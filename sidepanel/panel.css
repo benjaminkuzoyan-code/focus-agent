@@ -670,3 +670,6 @@ body:not(.dev) .dev { display: none !important; }
 .msg.k-checkpoint { border-color: rgba(129, 140, 248, 0.45); }
 .msg.k-ask-done { border-color: rgba(110, 231, 168, 0.45); }
 .msg.k-paper { border-color: rgba(252, 211, 77, 0.45); }
+
+.done-stats { white-space: pre-line; }
+.msg.k-dev { border-color: rgba(252, 211, 77, 0.45); }

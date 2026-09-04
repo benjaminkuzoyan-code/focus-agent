@@ -201,6 +201,30 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   await sleep(100);
   check("◂ returns to list", visible("list"));
 
+  // Ben's build: developer mode reveals the do-it-for-me chips + dev settings
+  $("more-btn").click();
+  $("dev-toggle").checked = true;
+  $("dev-toggle").dispatchEvent(new window.Event("change", { bubbles: true }));
+  await sleep(100);
+  check("dev toggle flips body.dev + persists", window.document.body.classList.contains("dev") && store.settings?.devMode === true);
+  check("dev chips present (4)", window.document.querySelectorAll("#work-chips .chat-chip.dev").length === 4);
+  check("nightly + auto-done settings rows exist", Boolean($("nightly-toggle") && $("auto-done-toggle")));
+  $("more-btn").click();
+  await sleep(100);
+  // Start a session and try 'write this step' with the rules brain → honest offline message, step NOT checked off
+  window.document.querySelectorAll("#today-list .card")[0].querySelector(".start").click();
+  await sleep(600);
+  const before = window.document.querySelectorAll("#work-messages .msg").length;
+  window.document.querySelector('#work-chips [data-cmd="dev-write"]').click();
+  await sleep(400);
+  const last = [...window.document.querySelectorAll("#work-messages .msg")].pop();
+  check("dev write w/o brain → offline message, nothing faked", window.document.querySelectorAll("#work-messages .msg").length > before && /offline|bridge/i.test(last.textContent) && window.document.querySelectorAll("#steps .step.done").length === 0);
+  $("work-stop").click();
+  await sleep(400);
+  check("stop → done view labelled stopped", visible("done") && /stopped/.test($("done-label").textContent));
+  check("stop recorded as endedBy stop", store.sessions.some((s) => s.endedBy === "stop"));
+  $("done-close").click();
+
   // time budget → inline plan
   window.document.querySelector('.time-chip[data-min="60"]').click();
   await sleep(300);

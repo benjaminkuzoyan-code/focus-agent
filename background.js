@@ -223,6 +223,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
       }
 
+      case "NIGHTLY_SYNC":
+        await syncNightlyAlarm();
+        sendResponse({ ok: true });
+        break;
+
       case "THREAD_APPEND": {
         // A highlight note / summary / answer from a page lands in the chat
         // of the assignment being worked, if a session is running.
@@ -273,7 +278,73 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === DETECT_ALARM) {
     await detectCompletion();
   }
+
+  if (alarm.name === NIGHTLY_ALARM) {
+    await runNightlyPlan();
+  }
 });
+
+/* ------------------------------------------------------------------ *
+ * Nightly auto-plan (Ben's build, opt-in): at 4:30pm read the cached
+ * assignments, build tonight's plan the way the time chips do, write the
+ * blocks to Google Calendar when connected, and send ONE notification.
+ * S04 builds this by hand in ChatGPT every night — this is the same plan,
+ * unasked. Never ships on in the student build.
+ * ------------------------------------------------------------------ */
+const NIGHTLY_ALARM = "fa-nightly";
+
+async function syncNightlyAlarm() {
+  const settings = await FA.store.getSettings();
+  const on = Boolean(settings.devMode && settings.nightlyPlan);
+  const existing = await chrome.alarms.get(NIGHTLY_ALARM);
+  if (!on) {
+    if (existing) chrome.alarms.clear(NIGHTLY_ALARM);
+    return;
+  }
+  if (existing) return;
+  const when = new Date();
+  when.setHours(16, 30, 0, 0);
+  if (when <= new Date()) when.setDate(when.getDate() + 1);
+  chrome.alarms.create(NIGHTLY_ALARM, { when: when.getTime(), periodInMinutes: 24 * 60 });
+  console.log("[Focus Agent] nightly plan scheduled for", when.toString());
+}
+chrome.runtime.onStartup.addListener(syncNightlyAlarm);
+chrome.runtime.onInstalled.addListener(syncNightlyAlarm);
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.settings) syncNightlyAlarm();
+});
+
+async function runNightlyPlan() {
+  const settings = await FA.store.getSettings();
+  if (!settings.devMode || !settings.nightlyPlan) return;
+  const cache = await FA.store.getCachedAssignments();
+  const items = cache?.items || [];
+  if (!items.length) return;
+  const [meta, sessions] = await Promise.all([FA.store.getMeta(), FA.store.getSessions()]);
+  const ranked = FA.rankAssignments(items, meta, sessions);
+  if (!ranked.length) return;
+  await ensureBrain();
+  const minutes = settings.nightlyMinutes || 120;
+  const plan = await Promise.resolve(FA.coach.panicPlan(ranked, minutes));
+  const work = plan.blocks.filter((b) => !b.isBreak);
+  let calNote = "";
+  try {
+    if (await FA.google.isConnected()) {
+      const evs = await FA.google.addPlanBlocks(work);
+      calNote = ` ${evs.length} block${evs.length === 1 ? "" : "s"} on your calendar.`;
+    }
+  } catch (e) {
+    calNote = ` (calendar: ${e.message})`;
+  }
+  await chrome.storage.local.set({ nightlyPlan: { at: Date.now(), plan, minutes } });
+  chrome.notifications.create(`fa-nightly-${Date.now()}`, {
+    type: "basic",
+    iconUrl: "icons/icon128.png",
+    title: "Tonight's plan",
+    message: `${work.map((b) => `${b.start} ${b.title}`).slice(0, 3).join(" · ")}${work.length > 3 ? " · …" : ""}.${calNote}`,
+    priority: 1,
+  });
+}
 
 /* ------------------------------------------------------------------ *
  * The timer is the work: detect when the job is done

@@ -77,6 +77,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((err) => sendResponse({ error: err.message }));
     return true; // async response
   }
+  if (message.type === "MARK_COMPLETE") {
+    // Ben's build: flip the portal's own "completed" checkbox. Throws until
+    // the request is captured — see adapters/blackbaud.js markComplete.
+    Promise.resolve(FA.adapters.blackbaud.markComplete(message.indexId))
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
   if (message.type === "GET_SNAPSHOT") {
     buildAndCacheSnapshot(Boolean(message.fresh))
       .then((snapshot) => sendResponse({ snapshot }))

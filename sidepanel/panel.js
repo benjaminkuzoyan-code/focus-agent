@@ -66,6 +66,8 @@ async function loadAssignments(retried = false) {
   $("source-select").value = settings.dataSource;
   $("mode-select").value = settings.mode || "tutor";
   $("dev-toggle").checked = Boolean(settings.devMode);
+  $("nightly-toggle").checked = Boolean(settings.nightlyPlan);
+  $("auto-done-toggle").checked = Boolean(settings.autoDone);
   document.body.classList.toggle("dev", Boolean(settings.devMode));
 
   sourceNotice = "";
@@ -1008,10 +1010,166 @@ async function runChip(cmd) {
       $("step-input").focus();
       return;
     case "dev-write":
-      return sendWork(cur ? `[dev] Write this step for me, fully, ready to paste: "${cur.text}".` : "[dev] Write the next part for me, ready to paste.");
+      return devWriteStep(cur);
     case "dev-answer":
-      return sendWork("[dev] Answer every question in this assignment fully, with work shown where it applies.");
+      return devAnswerAll();
+    case "dev-photo":
+      $("photo-input").click();
+      return;
+    case "dev-complete":
+      return devMarkComplete(current.assignment);
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Ben's build — the coach does the work (developer mode only)
+ * ------------------------------------------------------------------ */
+async function docFor(assignment) {
+  const meta = await FA.store.getMeta();
+  const m = meta?.[assignment.id] || {};
+  const id = m.docId || (m.docUrl?.match(/\/document\/d\/([\w-]+)/) || [])[1] || null;
+  return { id, url: m.docUrl || null };
+}
+
+async function devWriteStep(step) {
+  if (!step) return pushCoach("Every step is checked — nothing left to write.");
+  showWorkTyping();
+  const { id: docId } = await docFor(current.assignment);
+  let docText = "";
+  if (docId) {
+    try {
+      docText = (await FA.google.readDoc(`https://docs.google.com/document/d/${docId}/edit`)).text;
+    } catch {
+      /* fine — write without context */
+    }
+  }
+  const r = await Promise.resolve(FA.coach.writeStep(current.assignment, step, current.steps, docText));
+  $("work-typing")?.remove();
+  if (!r.text) return pushCoach(r.error || "Couldn't write it.");
+
+  if (docId && (await FA.google.isConnected().catch(() => false))) {
+    try {
+      const { words } = await FA.google.appendToDoc(docId, step.text, r.text);
+      step.done = true;
+      step.doneBy = "coach";
+      step.doneAt = Date.now();
+      renderSteps();
+      await saveSteps();
+      return pushCoach(`✍️ wrote “${step.text}” into your doc — ${words} words. Read it once before you keep it.`, { kind: "dev" });
+    } catch (e) {
+      await pushCoach(`Couldn't write into the doc (${e.message}) — here it is to paste:`, { kind: "dev" });
+    }
+  }
+  return pushCoach(r.text, { kind: "dev" });
+}
+
+async function devAnswerAll() {
+  showWorkTyping();
+  const r = await Promise.resolve(FA.coach.answerAll(current.assignment));
+  $("work-typing")?.remove();
+  if (!r.text) return pushCoach(r.error || "Couldn't answer.");
+  const { id: docId } = await docFor(current.assignment);
+  if (docId && (await FA.google.isConnected().catch(() => false))) {
+    try {
+      await FA.google.appendToDoc(docId, "Answers", r.text);
+      await pushCoach("✍️ answers written into your doc.", { kind: "dev" });
+    } catch {
+      /* fall through to chat */
+    }
+  }
+  return pushCoach(r.text, { kind: "dev" });
+}
+
+/** Downscale a photo so the bridge (and the model) get a sane payload. */
+function shrinkImage(file, maxSide = 1600) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * scale);
+      c.height = Math.round(img.height * scale);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+$("photo-input").addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (!file || !current) return;
+  showWorkTyping();
+  let dataUrl;
+  try {
+    dataUrl = await shrinkImage(file);
+  } catch {
+    $("work-typing")?.remove();
+    return pushCoach("Couldn't read that image.");
+  }
+  const r = await Promise.resolve(FA.coach.readPhoto(current.assignment, current.steps, dataUrl));
+  $("work-typing")?.remove();
+  if (!r.legible) return pushCoach(`📷 ${r.feedback || "Too blurry to judge — try again with more light."}`, { kind: "dev" });
+  for (const i of r.stepsDone) {
+    const s = current.steps[i];
+    if (s && !s.done) {
+      s.done = true;
+      s.doneBy = "photo";
+      s.doneAt = Date.now();
+    }
+  }
+  renderSteps();
+  await saveSteps();
+  const n = r.stepsDone.length;
+  await pushCoach(`📷 ${n ? `checked ${n} step${n > 1 ? "s" : ""} from your photo. ` : "nothing on the list is visibly finished yet. "}${r.feedback}`, { kind: "dev" });
+  if (current.steps.every((s) => s.done)) {
+    await pushCoach("That's everything. Turned in?", { kind: "checkpoint", actions: [{ label: "finish ✓", cmd: "finish" }] });
+  }
+});
+
+/** Tick the assignment complete in the portal (needs the captured request — see adapters/blackbaud.js). */
+async function devMarkComplete(assignment) {
+  const indexId = assignment.raw?.assignment_index_id ?? assignment.raw?.AssignmentIndexId ?? String(assignment.id).replace(/^blackbaud-/, "");
+  const tabs = await chrome.tabs.query({ url: PORTAL_URL_PATTERNS });
+  for (const tab of tabs) {
+    try {
+      const res = await chrome.tabs.sendMessage(tab.id, { type: "MARK_COMPLETE", indexId });
+      if (res?.ok) return pushCoach("✓ ticked complete in myPoly.", { kind: "dev" });
+      return pushCoach(`myPoly mark-complete: ${res?.error || "failed"}`, { kind: "dev" });
+    } catch {
+      /* next tab */
+    }
+  }
+  return pushCoach("No portal tab open — open myPoly and try again.", { kind: "dev" });
+}
+
+/** Auto-actions after done ✓ (Ben's build, opt-in). Returns lines for the done view. */
+async function autoActionsOnDone(a, nextPick) {
+  const lines = [];
+  if (!settings.devMode || !settings.autoDone || !a) return lines;
+  try {
+    const indexId = a.raw?.assignment_index_id ?? String(a.id).replace(/^blackbaud-/, "");
+    const tabs = await chrome.tabs.query({ url: PORTAL_URL_PATTERNS });
+    if (tabs[0]) {
+      const res = await chrome.tabs.sendMessage(tabs[0].id, { type: "MARK_COMPLETE", indexId });
+      lines.push(res?.ok ? "✓ ticked complete in myPoly" : `myPoly: ${res?.error || "not ticked"}`);
+    }
+  } catch {
+    /* no portal tab */
+  }
+  if (nextPick && (await FA.google.isConnected().catch(() => false))) {
+    try {
+      const start = new Date(Date.now() + 10 * 60000);
+      const end = new Date(start.getTime() + (nextPick.estMin || 25) * 60000);
+      await FA.google.addEvent({ title: `📚 ${nextPick.title}`, description: nextPick.course, start, end, minutesBefore: 5 });
+      lines.push(`📅 Calendar block for “${nextPick.title}” at ${start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`);
+    } catch (e) {
+      lines.push(`calendar: ${e.message}`);
+    }
+  }
+  return lines;
 }
 
 /* ---- finishing ---- */
@@ -1069,14 +1227,22 @@ async function renderDone(a, record, done) {
   // What's next: the coach's pick, minus what we just finished.
   const rest = ranked.filter((x) => x.id !== a?.id);
   const next = $("done-next");
+  let nextPick = null;
   if (!rest.length) {
     next.classList.add("hidden");
   } else {
     const { assignment, reason } = new FA.MockCoach().pick(rest);
+    nextPick = assignment;
     next.classList.remove("hidden");
     $("next-title").textContent = assignment.title;
     $("next-meta").textContent = `${assignment.course} · ~${assignment.estMin} min — ${reason}`;
     $("next-start").onclick = () => smartStart(assignment);
+  }
+
+  // Ben's build: auto-actions, reported honestly under the debrief.
+  if (done) {
+    const lines = await autoActionsOnDone(a, nextPick);
+    if (lines.length) $("done-stats").textContent += "\n" + lines.join("\n");
   }
 }
 
@@ -1394,6 +1560,15 @@ $("dev-toggle").addEventListener("change", async (e) => {
   await FA.store.setSettings({ devMode: e.target.checked });
   settings.devMode = e.target.checked;
   document.body.classList.toggle("dev", e.target.checked);
+});
+$("nightly-toggle").addEventListener("change", async (e) => {
+  await FA.store.setSettings({ nightlyPlan: e.target.checked });
+  settings.nightlyPlan = e.target.checked;
+  chrome.runtime.sendMessage({ type: "NIGHTLY_SYNC" }).catch(() => {});
+});
+$("auto-done-toggle").addEventListener("change", async (e) => {
+  await FA.store.setSettings({ autoDone: e.target.checked });
+  settings.autoDone = e.target.checked;
 });
 $("commit-btn").addEventListener("click", addCommitment);
 $("chat-send").addEventListener("click", () => sendChat());

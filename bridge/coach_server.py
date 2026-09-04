@@ -16,9 +16,11 @@ plan quota -- fine for personal use, replaced by a proper backend once
 the API key exists.
 """
 
+import base64
 import json
 import re
 import subprocess
+import time
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
@@ -162,6 +164,53 @@ def build_ask_passage(p):
         "Answer about THIS passage. Use as many words as the answer needs and no "
         "more. Plain text, simple markdown allowed. Reply JSON: {\"reply\": \"<answer>\"}"
     ), ["reply"]
+
+
+# ---- Ben's build (developer mode): the coach does the work ----------------
+
+def build_write_step(p):
+    doc = str(p.get("docText") or "")[:12000]
+    return (
+        f"{COACH_IDENTITY}\n\n"
+        "DEVELOPER MODE: the student has asked you to WRITE this part for them, "
+        "finished and ready to paste. Do it fully -- no outlines, no 'you could', "
+        "no placeholders. Match the assignment's requirements exactly; sound like "
+        "a strong 9th grader, not a press release.\n\n"
+        f"Assignment: {json.dumps(p.get('assignment', {}))}\n"
+        f"The step to write: {json.dumps(p.get('step', {}))}\n"
+        f"Checklist so far: {json.dumps(p.get('steps', []))}\n"
+        + (f"What's already in their doc:\n---\n{doc}\n---\n" if doc else "")
+        + '\nReply JSON: {"text": "<the finished text for this step, paragraphs separated by \\n\\n>"}'
+    ), ["text"]
+
+
+def build_answer_all(p):
+    return (
+        f"{COACH_IDENTITY}\n\n"
+        "DEVELOPER MODE: answer every question in this assignment fully. Show work "
+        "where the subject calls for it (math, science). Number the answers to "
+        "match the questions. Plain text.\n\n"
+        f"Assignment (instructions included): {json.dumps(p.get('assignment', {}))}\n"
+        + (f"Extra material the student pasted:\n---\n{str(p.get('extra') or '')[:8000]}\n---\n" if p.get("extra") else "")
+        + '\nReply JSON: {"text": "<all answers>"}'
+    ), ["text"]
+
+
+def build_read_photo(p):
+    # The handler saved the photo to disk and put its path in p["imagePath"].
+    return (
+        f"{COACH_IDENTITY}\n\n"
+        f"Read the image file at {p.get('imagePath')} -- it is a photo of the student's "
+        "handwritten or paper work for this assignment. Use your file-reading tool "
+        "to look at it.\n\n"
+        f"Assignment: {json.dumps(p.get('assignment', {}))}\n"
+        f"Their checklist (index, text, deliverable): {json.dumps(p.get('steps', []))}\n\n"
+        "Decide which checklist steps the photo shows as DONE (the deliverable "
+        "visibly exists), give one honest line of feedback on the work itself "
+        "(what's right, what to fix), and say if the photo was too blurry/dark to "
+        "judge. Reply JSON: {\"legible\": true|false, \"stepsDone\": [<indexes>], "
+        "\"feedback\": \"<≤40 words>\"}"
+    ), ["legible", "stepsDone", "feedback"]
 
 
 def build_autopsy(p):
@@ -349,6 +398,9 @@ BUILDERS = {
     "summarize": build_summarize,
     "annotateQuestion": build_annotate_question,
     "askPassage": build_ask_passage,
+    "writeStep": build_write_step,
+    "answerAll": build_answer_all,
+    "readPhoto": build_read_photo,
     "autopsy": build_autopsy,
     "chat": build_chat,
     "explain": build_explain,
@@ -464,7 +516,19 @@ class Handler(SimpleHTTPRequestHandler):
             if not builder:
                 return self._send_json(400, {"error": f"unknown method: {method}"})
 
-            prompt, required = builder(req.get("payload", {}))
+            payload = req.get("payload", {})
+            if method == "readPhoto":
+                # Photo arrives as a data URL; Claude reads files, not base64 blobs.
+                data_url = str(payload.pop("imageDataUrl", "") or "")
+                m = re.match(r"data:image/(png|jpeg|jpg|webp);base64,(.+)", data_url, re.S)
+                if not m:
+                    return self._send_json(400, {"error": "readPhoto needs imageDataUrl (png/jpeg/webp)"})
+                tmp_dir = Path.home() / ".focus-agent" / "tmp"
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+                img = tmp_dir / f"photo-{int(time.time())}.{m.group(1).replace('jpeg', 'jpg')}"
+                img.write_bytes(base64.b64decode(m.group(2)))
+                payload["imagePath"] = str(img)
+            prompt, required = builder(payload)
             if method == "chat":
                 return self._send_json(200, {"ok": True, "result": {"reply": ask_claude_text(prompt)}})
             result = ask_claude(prompt)
