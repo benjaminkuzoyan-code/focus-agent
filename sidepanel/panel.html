@@ -9,37 +9,49 @@
   <!-- Slow-drifting gradient backdrop; everything floats above it -->
   <div class="bg-aurora" aria-hidden="true"></div>
 
+  <!--
+    ONE SCREEN, THREE STATES (+ ▸more):
+      list  → every pending assignment, one button each: ▶ Smart Start
+      work  → the assignment you're on: clock · checklist · coach chat
+      done  → what just happened + what's next
+      more  → classes, stats, XP, commitments, settings — never needed to start
+  -->
   <header>
     <div class="brand">
       <span class="logo">◎</span>
       <span class="title">focus</span>
     </div>
     <div class="header-right">
-      <span id="brain-badge" class="chip" title="Which brain is coaching">⚙️</span>
       <span id="streak-badge" class="chip" title="Days in a row with a focus session">🔥 0</span>
-      <button id="google-btn" class="chip chip-btn" title="Connect Google (Docs + Calendar)">G</button>
       <button id="refresh-btn" class="chip chip-btn" title="Re-read assignments from your portal">↻</button>
-      <button id="annotate-btn" class="chip chip-btn" title="Draw on the current page">✏️</button>
-      <select id="mode-select" title="How much the assistant helps: tutor (teaches, no final answers) or answer (gives answers)">
-        <option value="tutor">tutor</option>
-        <option value="answer">answer</option>
-      </select>
-      <select id="source-select" title="Data source">
-        <option value="mock">demo</option>
-        <option value="auto">portal</option>
-      </select>
+      <button id="more-btn" class="chip chip-btn" title="Classes, stats, settings">▸</button>
     </div>
   </header>
 
   <main class="views">
-    <!-- HOME -->
-    <section id="tab-today" class="tab-panel active">
+    <!-- ============ STATE A: LIST ============ -->
+    <section id="view-list" class="view active">
+      <!-- A session is running but you're looking at the list -->
+      <button id="resume-banner" class="resume-banner hidden"></button>
+
       <div id="forecast-strip" class="forecast-strip"></div>
       <div id="forecast-headline" class="forecast-headline"></div>
 
-      <div id="coach-pick" class="coach-hero hidden">
-        <div class="coach-label">coach</div>
-        <div id="coach-pick-text"></div>
+      <!-- Panic is a mode of the list: pick how much time you have, the
+           list reorders and says what dies tonight. -->
+      <div class="time-row">
+        <span class="time-label">tonight I have</span>
+        <button class="time-chip active" data-min="0" title="Show everything">all</button>
+        <button class="time-chip" data-min="30">30m</button>
+        <button class="time-chip" data-min="60">1h</button>
+        <button class="time-chip" data-min="90">1.5h</button>
+        <button class="time-chip" data-min="120">2h</button>
+      </div>
+      <div id="plan-inline" class="panic-plan hidden"></div>
+
+      <div id="coach-pick" class="coach-line hidden">
+        <span class="coach-label">coach</span>
+        <span id="coach-pick-text"></span>
       </div>
 
       <!-- Avoidance detection: shown only when the data says something's
@@ -49,97 +61,88 @@
         <div id="avoid-text"></div>
         <div class="card-actions">
           <button id="avoid-micro" class="start">🌱 just 2 minutes</button>
-          <button id="avoid-breakdown">cut it smaller</button>
         </div>
       </div>
 
       <div id="today-list" class="list"></div>
     </section>
 
-    <!-- PANIC -->
-    <section id="tab-panic" class="tab-panel">
-      <div class="panic-intro glass">
-        <p>Multiple things due, not enough night left? Deep breath. I'll triage.</p>
-        <label>minutes you can work tonight
-          <input type="number" id="panic-minutes" value="120" min="15" max="600" step="15" />
-        </label>
-        <button id="panic-btn" class="panic-button">I'M SCREWED — TRIAGE IT</button>
-      </div>
-      <div id="panic-plan" class="panic-plan"></div>
-    </section>
-
-    <!-- TIMER -->
-    <section id="tab-timer" class="tab-panel">
-      <div id="timer-idle" class="timer-idle">
-        <p class="muted">pick something on Home and hit <b>Smart Start</b>, or run a free session</p>
-        <button id="free-session-btn" class="primary pulse">start 25-min session</button>
-      </div>
-
-      <div id="timer-active" class="hidden timer-stage">
-        <div class="timer-task" id="timer-task"></div>
-        <!-- Feeling check-in: one optional tap; dread changes the coaching -->
-        <div id="mood-row" class="mood-row hidden">
-          <span class="mood-q">how's this one feel?</span>
-          <button class="mood" data-mood="good" title="feeling fine">😃</button>
-          <button class="mood" data-mood="meh" title="whatever">😐</button>
-          <button class="mood" data-mood="dread" title="dreading it">😬</button>
-          <button class="mood mood-skip" data-mood="skip" title="skip">✕</button>
+    <!-- ============ STATE B: WORKING (Smart Start) ============ -->
+    <section id="view-work" class="view">
+      <div class="work-head">
+        <button id="work-back" class="chip chip-btn" title="Back to the list — the clock keeps running">◂</button>
+        <div class="work-title-wrap">
+          <div id="work-title" class="work-title"></div>
+          <div id="work-meta" class="work-meta"></div>
         </div>
-        <div id="mood-response" class="mood-response hidden"></div>
-        <!-- Smart Setup summary: what the agent set up, what's left for you -->
-        <div id="setup-summary" class="setup-summary hidden"></div>
-        <div class="ring-wrap">
-          <svg class="ring" viewBox="0 0 220 220">
-            <defs>
-              <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#818cf8" />
-                <stop offset="100%" stop-color="#c084fc" />
-              </linearGradient>
-            </defs>
-            <circle class="ring-bg" cx="110" cy="110" r="96" />
-            <circle class="ring-fg" id="ring-fg" cx="110" cy="110" r="96" />
-          </svg>
-          <div class="ring-center">
-            <div class="timer-clock" id="timer-clock">25:00</div>
-            <div class="timer-sub" id="timer-sub"></div>
-          </div>
-        </div>
-        <div class="timer-actions">
-          <button id="end-session-btn" class="primary">done — end session</button>
-          <button id="abandon-session-btn" class="ghost">abandon</button>
+        <div class="work-clock">
+          <div id="work-elapsed" class="work-elapsed">0:00</div>
+          <div id="work-chunk" class="work-chunk"></div>
         </div>
       </div>
+      <div class="chunk-bar"><div id="chunk-fill" class="chunk-fill"></div></div>
 
-      <div id="debrief-toast" class="debrief-toast hidden"></div>
-
-      <div class="commit-box">
-        <div class="section-title">commitments 🧾</div>
-        <p class="muted small">tell the coach when you'll start. it remembers — and brings receipts.</p>
-        <div class="commit-form">
-          <input type="text" id="commit-text" placeholder='e.g. "start the essay"' />
-          <input type="time" id="commit-time" />
-          <button id="commit-btn">hold me to it</button>
-        </div>
-        <div id="commit-list" class="list"></div>
+      <!-- Feeling check-in: one optional tap; dread changes the coaching -->
+      <div id="mood-row" class="mood-row hidden">
+        <span class="mood-q">how's this one feel?</span>
+        <button class="mood" data-mood="good" title="feeling fine">😃</button>
+        <button class="mood" data-mood="meh" title="whatever">😐</button>
+        <button class="mood" data-mood="dread" title="dreading it">😬</button>
+        <button class="mood mood-skip" data-mood="skip" title="skip">✕</button>
       </div>
-    </section>
+      <div id="mood-response" class="mood-response hidden"></div>
 
-    <!-- CHAT -->
-    <section id="tab-chat" class="tab-panel chat-panel">
-      <div id="chat-messages" class="chat-messages"></div>
-      <div id="chat-chips" class="chat-chips">
-        <button class="chat-chip" data-msg="Replan my week — what should I move around?">replan my week</button>
-        <button class="chat-chip" data-msg="Why should I start with the assignment you picked?">why this first?</button>
-        <button class="chat-chip" data-msg="Quiz me on what I just studied.">quiz me</button>
+      <!-- The breakdown, as a checklist you can edit -->
+      <div id="steps" class="steps"></div>
+      <div class="step-add">
+        <input type="text" id="step-input" placeholder="+ add a step" autocomplete="off" />
+      </div>
+
+      <!-- The coach, scoped to THIS assignment -->
+      <div id="work-messages" class="chat-messages work-messages"></div>
+      <div id="work-chips" class="chat-chips">
+        <button class="chat-chip" data-cmd="explain" title="What is the teacher actually asking for?">explain</button>
+        <button class="chat-chip" data-cmd="breakdown" title="Redo the checklist from the instructions">break it down</button>
+        <button class="chat-chip" data-cmd="precheck" title="Tutor feedback on your draft — pointers, never rewrites">check my draft</button>
+        <button class="chat-chip" data-cmd="stuck">I'm stuck</button>
+        <button class="chat-chip" data-cmd="more5">5 more minutes</button>
+        <!-- Ben's build only (settings → developer mode) -->
+        <button class="chat-chip dev" data-cmd="dev-write" title="Dev: the coach writes the current step">write this step</button>
+        <button class="chat-chip dev" data-cmd="dev-answer" title="Dev: the coach answers the questions">answer these</button>
       </div>
       <div class="chat-input-row">
-        <input type="text" id="chat-input" placeholder="talk to your coach…" autocomplete="off" />
-        <button id="chat-send" class="chat-send" title="send">➤</button>
+        <input type="text" id="work-input" placeholder="ask the coach about this…" autocomplete="off" />
+        <button id="work-send" class="chat-send" title="send">➤</button>
+      </div>
+      <div class="work-actions">
+        <button id="work-done" class="primary">done ✓</button>
+        <button id="work-stop" class="ghost" title="Stop for now — time is logged, the assignment stays">stop</button>
       </div>
     </section>
 
-    <!-- STATS -->
-    <section id="tab-classes" class="tab-panel">
+    <!-- ============ STATE C: DONE ============ -->
+    <section id="view-done" class="view">
+      <div class="done-card">
+        <div id="done-label" class="coach-label">done</div>
+        <div id="done-title" class="work-title"></div>
+        <div id="done-stats" class="done-stats"></div>
+        <div id="done-debrief" class="done-debrief"></div>
+      </div>
+      <div id="done-next" class="card next-card hidden">
+        <div class="card-row">
+          <div class="card-main">
+            <div class="coach-label">next</div>
+            <div id="next-title" class="card-title"></div>
+            <div id="next-meta" class="card-meta"></div>
+          </div>
+          <button id="next-start" class="start">▶ Smart Start</button>
+        </div>
+      </div>
+      <button id="done-close" class="ghost wide">done for now</button>
+    </section>
+
+    <!-- ============ ▸ MORE ============ -->
+    <section id="view-more" class="view">
       <div class="section-title">your classes</div>
       <div id="class-list" class="list"></div>
       <div class="section-title">this week</div>
@@ -153,44 +156,74 @@
           <button id="phone-copy" class="hidden">Copy feed link</button>
         </div>
       </div>
-    </section>
 
-    <section id="tab-stats" class="tab-panel">
+      <div class="section-title">stats</div>
       <div class="stat-row" id="stat-cards"></div>
-
-      <div class="section-title">focus trends 📈</div>
+      <div id="level-box" class="level-box glass"></div>
       <div class="chart-box glass"><div class="chart-title">focused minutes — last 14 days</div><div id="chart-daily"></div></div>
       <div class="chart-box glass"><div class="chart-title">when you actually focus</div><div id="chart-hours"></div></div>
-
-      <div class="section-title">distractions 🚨</div>
       <div class="chart-box glass"><div class="chart-title">distractions per session</div><div id="chart-distract-trend"></div></div>
       <div class="chart-box glass"><div class="chart-title">what's costing you (~23 min refocus each — UC Irvine research)</div><div id="chart-distract-sites"></div><div id="distract-cost" class="muted small"></div></div>
-
       <div class="section-title">procrastination autopsy 🔍</div>
       <p class="muted small">your real patterns, from your real sessions. no judgment — just receipts.</p>
       <div id="autopsy" class="autopsy"></div>
-    </section>
 
-    <!-- QUESTS -->
-    <section id="tab-quests" class="tab-panel">
-      <div id="level-box" class="level-box glass"></div>
-      <div class="section-title">boss battles ⚔️</div>
-      <div id="boss-list"></div>
-      <div class="section-title">quest board</div>
-      <div id="quest-list" class="list"></div>
+      <div class="section-title">commitments 🧾</div>
+      <p class="muted small">tell the coach when you'll start. it remembers — and brings receipts.</p>
+      <div class="commit-form">
+        <input type="text" id="commit-text" placeholder='e.g. "start the essay"' />
+        <input type="time" id="commit-time" />
+        <button id="commit-btn">hold me to it</button>
+      </div>
+      <div id="commit-list" class="list"></div>
+
+      <div class="section-title">ask the coach anything</div>
+      <div id="chat-messages" class="chat-messages more-chat"></div>
+      <div class="chat-chips">
+        <button class="chat-chip" data-msg="Replan my week — what should I move around?">replan my week</button>
+        <button class="chat-chip" data-msg="Why should I start with the assignment you picked?">why this first?</button>
+        <button class="chat-chip" data-msg="Quiz me on what I just studied.">quiz me</button>
+      </div>
+      <div class="chat-input-row">
+        <input type="text" id="chat-input" placeholder="talk to your coach…" autocomplete="off" />
+        <button id="chat-send" class="chat-send" title="send">➤</button>
+      </div>
+
+      <div class="section-title">settings</div>
+      <div class="settings">
+        <div class="settings-row">
+          <span>brain</span>
+          <span id="brain-badge" class="chip">⚙️ rules</span>
+        </div>
+        <div class="settings-row">
+          <span>Google (Docs + Calendar)</span>
+          <button id="google-btn" class="chip chip-btn">G</button>
+        </div>
+        <div class="settings-row">
+          <span>assistant mode</span>
+          <select id="mode-select" title="tutor teaches and never gives final answers; answer gives answers">
+            <option value="tutor">tutor</option>
+            <option value="answer">answer</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <span>data source</span>
+          <select id="source-select" title="Data source">
+            <option value="mock">demo</option>
+            <option value="auto">portal</option>
+          </select>
+        </div>
+        <div class="settings-row">
+          <span>draw on this page</span>
+          <button id="annotate-btn" class="chip chip-btn" title="Highlighter/pen overlay on the current tab">✏️</button>
+        </div>
+        <div class="settings-row">
+          <span>developer mode <span class="muted small">(Ben's build: do-it-for-me chips)</span></span>
+          <input type="checkbox" id="dev-toggle" />
+        </div>
+      </div>
     </section>
   </main>
-
-  <!-- Floating pill nav -->
-  <nav class="dock">
-    <button class="tab active" data-tab="today" title="Home"><span>🏠</span></button>
-    <button class="tab tab-panic" data-tab="panic" title="Panic"><span>😱</span></button>
-    <button class="tab" data-tab="timer" title="Timer"><span>⏱</span></button>
-    <button class="tab" data-tab="chat" title="Chat with your coach"><span>💬</span></button>
-    <button class="tab" data-tab="classes" title="Classes, grades, schedule"><span>🎓</span></button>
-    <button class="tab" data-tab="stats" title="Stats"><span>📈</span></button>
-    <button class="tab" data-tab="quests" title="Quests"><span>⚔️</span></button>
-  </nav>
 
   <!-- Load order matters: schema → adapters → libs → panel logic -->
   <script src="../adapters/schema.js"></script>

@@ -55,3 +55,11 @@ body {
 }
 .panic:hover { box-shadow: 0 0 18px rgba(239, 68, 68, 0.45); }
 .panic:active { transform: scale(0.96); }
+
+.ghost {
+  background: none; color: #9aa0b4; border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px; padding: 10px 14px; cursor: pointer; font-size: 13px;
+  transition: background 0.2s;
+}
+.ghost:hover { background: rgba(255, 255, 255, 0.06); }
+.primary:disabled { opacity: 0.5; cursor: default; box-shadow: none; }

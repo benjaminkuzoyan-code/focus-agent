@@ -44,27 +44,22 @@ focus-agent/
 └── popup/               # Mini "what's next" + Panic shortcut
 ```
 
-## The features
+## The features (v0.7 — one screen)
 
-| Feature | What it does | Status |
+The side panel is **one screen in three states**. Everything else lives behind ▸more.
+
+| State | What you see | Status |
 |---|---|---|
-| Today view | Assignments ranked by urgency × your measured pace | ✅ |
-| Coach pick | "Work on X, here's why" | ✅ (MockCoach) |
-| Panic Button | Minute-by-minute triage when you're screwed; honest sacrifices | ✅ |
-| Smart Start | One click: opens the right tabs, parks distractions, starts timer | ✅ |
-| Focus timer + streaks | Sessions logged on-device; streak survives an off day | ✅ |
-| Check-ins | "Still on it?" notifications mid-session | ✅ |
-| Distraction negotiation | Drift to YouTube → coach bargains with receipts, doesn't block | ✅ |
-| Focus Forecast | 7-day workload weather + "start Tuesday" headline | ✅ |
-| Procrastination Autopsy | Your real patterns from real sessions | ✅ |
-| Boss Battles | Tests = bosses; lead-up work drains their HP | ✅ |
-| Commitment Receipts | "You said 4pm" — the coach remembers | ✅ |
-| Page coach overlay | Badges + "START HERE" drawn on the actual portal rows; floating coach bubble with live timer HUD | ✅ v0.3 |
-| Doc Starter | One click: titled Google Doc created, outline on your clipboard | ✅ v0.3 |
-| Annotate any page | Highlighter/pen canvas over any webpage, saved per-URL | ✅ v0.3 |
-| Real analytics | Focus trend charts, power hours, distraction cost by site | ✅ v0.3 |
-| Teach-It-To-Claude, auto-flashcards, Sunday Briefing, Sleep Guardian | Needs the Claude API key | 🔜 |
-| Squad sessions, crowd difficulty, parent digest | Needs a backend | 🔜🔜 |
+| **list** | Every pending assignment ranked by urgency × your pace, one button each: **▶ Smart Start**. "tonight I have 30m/1h/1.5h/2h" turns the list into a triage plan with honest sacrifices. | ✅ |
+| **work** | The assignment you're on: elapsed clock + chunk bar, an **editable checklist** (the breakdown: ⋯ → smaller / why / move / remove, add your own), and the **coach chat scoped to this assignment** — it opens with what it set up and asks a question when the instructions are unclear. Chips: explain · break it down · check my draft · I'm stuck · 5 more minutes. | ✅ |
+| **done** | Minutes this sitting vs your guess, one debrief line, and the next pick with its own ▶. | ✅ |
+| **▸more** | Classes + grades + this week + phone alerts (iCal), stats + autopsy, XP level, commitments, general chat, settings (Google, tutor/answer, data source, ✏️ draw, developer mode). | ✅ |
+
+Still running underneath: tab parking (distractors move to a minimized window — nothing closed), distraction negotiation with receipts, check-in notifications, Focus Forecast, avoidance detection, streaks.
+
+**Developer mode** (▸more → settings) is Ben's build: extra chips (`write this step`, `answer these`) that ask the coach to do the work. Off by default; never on in the student build.
+
+Cut in v0.7: boss battles, the Quests tab, the Panic tab (now the time chips), the Timer tab (now the work view), per-card Explain/Pre-check/Break-down buttons (now chips inside the work view).
 
 ## The bridge server (demo portal + REAL Claude brain, no API key)
 

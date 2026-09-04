@@ -102,6 +102,33 @@ def build_breakdown(p):
     ), ["steps"]
 
 
+def build_breakdown_steps(p):
+    return (
+        f"{COACH_IDENTITY}\n\n"
+        f"Assignment (instructions included when the portal had them): {json.dumps(p.get('assignment', {}))}\n\n"
+        "Break it into a checklist a 9th grader can start immediately. Each step "
+        "names what EXISTS when it's done (the deliverable) and how many minutes it "
+        "takes at a normal pace -- every step 3-25 minutes, the first under 5. Steps "
+        "must be specific to THIS assignment (quote its parts), not generic study "
+        "advice. Make the task SMALLER, not easier: don't do the work, cut it up. "
+        'Reply JSON: {"steps": [{"text": "<instruction, ≤18 words>", '
+        '"deliverable": "<what exists when done, ≤12 words>", "estMin": <int>}]} '
+        "with 3-7 steps."
+    ), ["steps"]
+
+
+def build_split_step(p):
+    return (
+        f"{COACH_IDENTITY}\n\n"
+        f"Assignment: {json.dumps(p.get('assignment', {}))}\n"
+        f"The student says this step is still too big: {json.dumps(p.get('step', {}))}\n\n"
+        "Split it into 2-3 smaller steps whose minutes add up to roughly the original. "
+        "The first must be something they can do in under 5 minutes with zero thinking "
+        "(open, copy, list, reread). Specific to this assignment. "
+        'Reply JSON: {"steps": [{"text": "<≤18 words>", "deliverable": "<≤12 words>", "estMin": <int>}]}'
+    ), ["steps"]
+
+
 def build_autopsy(p):
     return (
         f"{COACH_IDENTITY}\n\n"
@@ -130,14 +157,23 @@ def build_chat(p):
         )
     elif p.get("docNote"):
         doc_block = f"Note about the student's screen: {p['docNote']}\n\n"
+    focus = p.get("focus") or None
+    focus_block = ""
+    if focus:
+        focus_block = (
+            "THE ASSIGNMENT THE STUDENT IS WORKING ON RIGHT NOW (the conversation is "
+            f"about this unless they change the subject): {json.dumps(focus.get('assignment', {}))}\n"
+            f"Their checklist for it (done flags are real): {json.dumps(focus.get('steps', []))}\n"
+            f"Minutes into this work session: {focus.get('elapsedMin', 0)}\n\n"
+        )
     return (
         f"{COACH_IDENTITY}\n\n"
         f"{_policy(p)}\n\n"
         "What you can see (be accurate if asked): the student's assignments, grades "
-        "and schedule from their school portal; and, if a Google Doc is open in their "
-        "active tab, its full text (below). Nothing else on their screen. The "
-        "extension also has an Explain button and a Pre-check button on every "
-        "assignment card.\n\n"
+        "and schedule from their school portal; the assignment they're working on "
+        "and its checklist; and, if a Google Doc is open in their active tab, its "
+        "full text (below). Nothing else on their screen.\n\n"
+        f"{focus_block}"
         f"{_context_block(p)}"
         f"{doc_block}"
         f"The student's current assignments: {json.dumps(p.get('assignments', []))}\n"
@@ -250,7 +286,11 @@ def build_setup(p):
         '"doc": true|false, '
         '"gather": ["<item, ≤10 words>", ...] (0-4 items), '
         '"focus": "<the part only the student can do, ≤20 words>", '
-        '"firstMove": "<under-5-min first step, ≤20 words>"}'
+        '"firstMove": "<under-5-min first step, ≤20 words>", '
+        '"confidence": <0.0-1.0: how sure you are what this assignment actually wants; '
+        'below 0.6 when instructions are missing or ambiguous>, '
+        '"missing": ["<the ONE specific question you would ask the student to be sure, ≤20 words>"] '
+        '(empty when confidence ≥ 0.6)}'
     ), ["opens", "focus", "firstMove"]
 
 
@@ -269,6 +309,8 @@ BUILDERS = {
     "pick": build_pick,
     "panicPlan": build_panic,
     "breakdown": build_breakdown,
+    "breakdownSteps": build_breakdown_steps,
+    "splitStep": build_split_step,
     "autopsy": build_autopsy,
     "chat": build_chat,
     "explain": build_explain,

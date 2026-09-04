@@ -7,10 +7,11 @@
 <body>
   <div class="header">
     <span class="logo">◎</span>
-    <span class="title">Focus Agent</span>
+    <span class="title">focus</span>
     <span id="streak" class="streak">🔥 0</span>
   </div>
 
+  <!-- The top card, and the one button. The side panel is the full view. -->
   <div id="next-up" class="next-up">
     <div class="label">Next up</div>
     <div id="next-title" class="next-title">Loading…</div>
@@ -18,11 +19,10 @@
   </div>
 
   <div class="actions">
-    <button id="open-panel" class="primary">Open coach panel →</button>
-    <button id="panic" class="panic">😱 Panic</button>
+    <button id="start" class="primary">▶ Smart Start</button>
+    <button id="open-panel" class="ghost" title="Open the full coach panel">panel</button>
   </div>
 
-  <!-- Same libs as the panel; the popup is just a mini window onto them. -->
   <script src="../adapters/schema.js"></script>
   <script src="../adapters/mock.js"></script>
   <script src="../lib/storage.js"></script>

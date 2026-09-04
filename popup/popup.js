@@ -1,6 +1,7 @@
 /**
- * popup/popup.js - Mini "what's next" view. The real coach lives in the
- * side panel; this is the one-glance version plus the Panic shortcut.
+ * popup/popup.js - The one-glance version: the coach's top pick and one
+ * button. Smart Start hands off to the side panel, which does the actual
+ * work (tab parking, setup, clock, chat) so there is exactly one code path.
  */
 
 const $ = (id) => document.getElementById(id);
@@ -13,9 +14,7 @@ async function loadRanked() {
     assignments = await FA.adapters.mock.fetchAssignments();
   } else {
     const cache = await FA.store.getCachedAssignments();
-    assignments = cache?.items?.length
-      ? cache.items
-      : await FA.adapters.mock.fetchAssignments();
+    assignments = cache?.items?.length ? cache.items : await FA.adapters.mock.fetchAssignments();
   }
 
   const [meta, sessions] = await Promise.all([FA.store.getMeta(), FA.store.getSessions()]);
@@ -23,31 +22,36 @@ async function loadRanked() {
   return FA.rankAssignments(assignments, meta, sessions);
 }
 
-async function openPanel(tab) {
+/** Open the side panel; optionally tell it to Smart Start an assignment. */
+async function openPanel(startId) {
+  if (startId) await chrome.storage.local.set({ panelStart: startId });
   const win = await chrome.windows.getCurrent();
   await chrome.sidePanel.open({ windowId: win.id });
-  if (tab) await chrome.storage.local.set({ panelOpenTab: tab });
   window.close();
 }
 
 (async () => {
   $("open-panel").addEventListener("click", () => openPanel());
-  $("panic").addEventListener("click", () => openPanel("panic"));
 
   const ranked = await loadRanked();
+  let picked = null;
 
-  // Instant rules pick; the real brain (local bridge) upgrades it in place.
+  // Instant rules pick; the real brain upgrades it in place.
   const show = ({ assignment, reason }, fromClaude) => {
+    picked = assignment;
     const prefix = fromClaude ? "🧠 " : "";
     if (assignment) {
       $("next-title").textContent = prefix + assignment.title;
       $("next-meta").textContent = `${assignment.course} · ~${assignment.estMin} min — ${reason}`;
+      $("start").disabled = false;
     } else {
       $("next-title").textContent = "Nothing pending 🏖️";
       $("next-meta").textContent = prefix + reason;
+      $("start").disabled = true;
     }
   };
   show(new FA.MockCoach().pick(ranked), false);
+  $("start").addEventListener("click", () => picked && openPanel(picked.id));
 
   const brain = await FA.initCoach();
   if (brain === "claude") {

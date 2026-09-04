@@ -1,10 +1,15 @@
 /**
- * sidepanel/panel.js - The coach's main surface.
+ * sidepanel/panel.js - The coach's one screen.
  *
- * Tabs: Today (ranked list + coach pick + Smart Start), Panic (triage),
- * Timer (sessions + commitments), Stats (streak + autopsy), Quests (XP +
- * boss battles). All data flows through FA.* libs; the AI brain is
- * FA.coach (MockCoach now, ClaudeCoach later — zero changes here).
+ * Three states + ▸more:
+ *   list → every pending assignment; one primary action: ▶ Smart Start
+ *   work → the assignment you're on: elapsed clock, editable checklist
+ *          (the breakdown), and the coach chat scoped to THIS assignment
+ *   done → what just happened, what's next
+ *   more → classes, stats, XP, commitments, general chat, settings
+ *
+ * All data flows through FA.* libs; the AI brain is FA.coach (MockCoach
+ * rules, or ClaudeCoach through the local bridge — zero changes here).
  */
 
 /* ------------------------------------------------------------------ *
@@ -13,8 +18,14 @@
 let assignments = [];   // normalized, from mock adapter / portal / cache
 let ranked = [];        // assignments + estMin + urgency, sorted
 let sourceNotice = "";  // why we're NOT showing live portal data ("" when live)
-let snapshot = null;    // full Student Snapshot (classes, grades, schedule) — see lib/snapshot.js
+let snapshot = null;    // full Student Snapshot (classes, grades, schedule)
+let settings = {};      // cached FA.store.getSettings()
 let timerInterval = null;
+let timeBudget = 0;     // minutes chosen on the "tonight I have" row (0 = all)
+let view = "list";
+
+/** The assignment being worked in State B. */
+let current = null;     // { assignment, steps: [], thread: [], awaitingDraft: false }
 
 const $ = (id) => document.getElementById(id);
 
@@ -27,15 +38,35 @@ const DISTRACTOR_PATTERNS = [
   /reddit\.com/, /netflix\.com/, /twitch\.tv/, /discord\.com/, /pinterest\.com/,
 ];
 
+const PORTAL_URL_PATTERNS = [
+  "https://*.myschoolapp.com/*",
+  "https://*.blackbaud.com/*",
+  "https://*.instructure.com/*",
+  "https://classroom.google.com/*",
+];
+
+/* ------------------------------------------------------------------ *
+ * Views
+ * ------------------------------------------------------------------ */
+function showView(name) {
+  view = name;
+  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
+  $("more-btn").textContent = name === "more" ? "◂" : "▸";
+  $("more-btn").title = name === "more" ? "Back" : "Classes, stats, settings";
+  window.scrollTo({ top: 0 });
+}
+
 /* ------------------------------------------------------------------ *
  * Data loading
  * ------------------------------------------------------------------ */
 
 /** Load assignments per the chosen source: mock, or live portal tab, or cache. */
 async function loadAssignments(retried = false) {
-  const settings = await FA.store.getSettings();
+  settings = await FA.store.getSettings();
   $("source-select").value = settings.dataSource;
   $("mode-select").value = settings.mode || "tutor";
+  $("dev-toggle").checked = Boolean(settings.devMode);
+  document.body.classList.toggle("dev", Boolean(settings.devMode));
 
   sourceNotice = "";
   if (settings.dataSource === "mock") {
@@ -60,8 +91,6 @@ async function loadAssignments(retried = false) {
       } else if (res?.assignments?.length) {
         assignments = res.assignments;
         console.log(`[Focus Agent] panel: ${assignments.length} assignments from ${label}`);
-        // The full snapshot (grades, schedule, topics) rides along; the
-        // content script caches it, so a miss here just means "use cached".
         try {
           const snapRes = await chrome.tabs.sendMessage(tab.id, { type: "GET_SNAPSHOT" });
           snapshot = snapRes?.snapshot || (await FA.loadSnapshot());
@@ -74,15 +103,12 @@ async function loadAssignments(retried = false) {
       }
     } catch (e) {
       // Usually "Receiving end does not exist": the tab was open before the
-      // extension loaded/reloaded, so it has no content script. A page
-      // refresh fixes it.
+      // extension loaded/reloaded, so it has no content script.
       disconnected++;
       diag.push(`${label}: not connected`);
     }
   }
 
-  // Tabs without a content script = the extension was reloaded. Ask the
-  // worker to re-inject, then try once more before falling back.
   if (disconnected && !retried) {
     try {
       const r = await chrome.runtime.sendMessage({ type: "REINJECT" });
@@ -91,14 +117,12 @@ async function loadAssignments(retried = false) {
         return loadAssignments(true);
       }
     } catch {
-      /* worker asleep or old worker without REINJECT — fall through */
+      /* worker asleep — fall through */
     }
   }
 
-  // No live portal — fall back to the last cached fetch, then to mock.
   snapshot = await FA.loadSnapshot();
   const cache = await FA.store.getCachedAssignments();
-  // Keep the headline readable: one line, not one per tab.
   const why = disconnected
     ? `${diag[0]}, ${disconnected} not connected — refresh a portal tab, then hit ↻`
     : diag.slice(0, 3).join("; ");
@@ -111,13 +135,6 @@ async function loadAssignments(retried = false) {
     sourceNotice = `⚠️ Demo data — ${why}. Open your school portal, refresh it, then hit ↻.`;
   }
 }
-
-const PORTAL_URL_PATTERNS = [
-  "https://*.myschoolapp.com/*",
-  "https://*.blackbaud.com/*",
-  "https://*.instructure.com/*",
-  "https://classroom.google.com/*",
-];
 
 /** Manual + automatic re-read of the portal (↻ button, portal tab loads). */
 async function reloadFromPortal() {
@@ -144,8 +161,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 async function refreshAll() {
-  // trackSeen stamps first-visibility on every assignment (avoidance clock)
-  // and hands back the merged meta in one storage round-trip.
   const [meta, sessions, questEvents, commitments] = await Promise.all([
     FA.store.trackSeen(assignments),
     FA.store.getSessions(),
@@ -157,19 +172,768 @@ async function refreshAll() {
 
   renderStreak(sessions);
   renderForecast(meta, sessions);
-  renderToday(sessions, meta);
+  renderList(meta);
   renderAvoidance(meta, sessions);
   renderStats(sessions, commitments);
-  renderQuests(meta, sessions, questEvents);
+  renderLevel(sessions, questEvents);
   renderCommitments(commitments);
   renderClasses();
-  await restoreTimerIfActive();
+  await renderResumeBanner();
 }
 
 /* ------------------------------------------------------------------ *
- * Classes tab: grades, this week's schedule, phone notifications.
- * Everything here comes from the Student Snapshot; nothing is computed
- * by the brain, so it's instant and works offline.
+ * STATE A — the list
+ * ------------------------------------------------------------------ */
+function renderStreak(sessions) {
+  $("streak-badge").textContent = `🔥 ${FA.computeStreak(sessions)}`;
+}
+
+function renderForecast(meta, sessions) {
+  const { days, headline } = FA.buildForecast(assignments, meta, sessions);
+  const strip = $("forecast-strip");
+  strip.innerHTML = "";
+  for (const d of days) {
+    const el = document.createElement("div");
+    el.className = "forecast-day" + (d.label === "STORM" ? " storm" : "");
+    el.title = d.due.length
+      ? `${d.due.length} due (~${d.loadMin} min): ${d.due.map((a) => a.title).join(", ")}`
+      : "Nothing due";
+    el.innerHTML = `<div class="icon">${d.icon}</div><div class="name">${d.name}</div>`;
+    strip.appendChild(el);
+  }
+  // The source notice wins over the forecast line.
+  $("forecast-headline").textContent = sourceNotice || headline;
+}
+
+function dueLabel(a) {
+  if (!a.dueDate) return "no due date";
+  const h = FA.hoursUntil(a.dueDate);
+  if (h < 0) return "OVERDUE";
+  if (h < 24) return "due today/tomorrow";
+  return `due ${new Date(a.dueDate).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`;
+}
+
+function renderList(meta = {}) {
+  // Instant pick from the rules, upgraded in place by the real brain.
+  const box = $("coach-pick");
+  box.classList.remove("hidden");
+  const showPick = ({ assignment, reason }, fromClaude) => {
+    const prefix = fromClaude ? "🧠 " : "";
+    $("coach-pick-text").textContent = assignment
+      ? `${prefix}"${assignment.title}" — ${reason}`
+      : prefix + reason;
+  };
+  showPick(new FA.MockCoach().pick(ranked), false);
+  if (FA.coachBrain === "claude") {
+    Promise.resolve(FA.coach.pick(ranked)).then((p) => showPick(p, true)).catch(() => {});
+  }
+
+  const list = $("today-list");
+  list.innerHTML = "";
+  if (!ranked.length) {
+    list.innerHTML = '<div class="empty-note">Nothing pending. 🏖️</div>';
+    return;
+  }
+
+  for (const a of ranked) {
+    const h = FA.hoursUntil(a.dueDate);
+    const card = document.createElement("div");
+    card.className = "card" + (h < 0 ? " overdue" : h < 30 ? " due-soon" : "");
+    const steps = meta?.[a.id]?.steps || [];
+    const done = steps.filter((s) => s.done).length;
+    card.innerHTML = `
+      <div class="card-row">
+        <div class="card-main">
+          <div class="card-title"></div>
+          <div class="card-meta"></div>
+        </div>
+        <div class="card-side">
+          ${steps.length ? `<span class="progress-pill" title="checklist progress">${done}/${steps.length}</span>` : ""}
+          <button class="start" title="Open what you need, park what you don't, start the clock">▶ Smart Start</button>
+          <button class="done-mini" title="Already finished this">✓</button>
+        </div>
+      </div>`;
+    card.querySelector(".card-title").textContent = a.title;
+    card.querySelector(".card-meta").textContent =
+      `${a.course} · ${dueLabel(a)} · ~${a.estMin} min` + (a.points ? ` · ${a.points} pts` : "");
+    card.querySelector(".start").addEventListener("click", () => smartStart(a));
+    card.querySelector(".done-mini").addEventListener("click", async () => {
+      await FA.store.markDone(a.id);
+      await FA.store.addQuestEvent(a, a.estMin);
+      await refreshAll();
+    });
+    list.appendChild(card);
+  }
+}
+
+/** "tonight I have N minutes" → the list becomes tonight's triage. */
+async function setTimeBudget(min) {
+  timeBudget = min;
+  document.querySelectorAll(".time-chip").forEach((c) => c.classList.toggle("active", Number(c.dataset.min) === min));
+  const wrap = $("plan-inline");
+  if (!min) {
+    wrap.classList.add("hidden");
+    wrap.innerHTML = "";
+    return;
+  }
+  wrap.classList.remove("hidden");
+  if (FA.coachBrain === "claude") {
+    wrap.innerHTML = '<div class="pep">🧠 Triaging your night… (~15s)</div>';
+  }
+  const { blocks, sacrifices, pep } = await Promise.resolve(FA.coach.panicPlan(ranked, min));
+  if (timeBudget !== min) return; // user changed their mind mid-call
+  wrap.innerHTML = "";
+
+  const pepEl = document.createElement("div");
+  pepEl.className = "pep";
+  pepEl.textContent = pep;
+  wrap.appendChild(pepEl);
+
+  for (const b of blocks) {
+    const el = document.createElement("div");
+    el.className = "plan-block" + (b.isBreak ? " break-block" : "");
+    if (b.isBreak) {
+      el.textContent = `☕ ${b.title} (${b.minutes} min)`;
+    } else {
+      el.innerHTML = `<span class="plan-time"></span><span class="plan-body"><span class="plan-title"></span><br><span class="plan-note"></span></span><button class="start mini">▶</button>`;
+      el.querySelector(".plan-time").textContent = `${b.start}–${b.end}`;
+      el.querySelector(".plan-title").textContent = `${b.title} (${b.course})`;
+      el.querySelector(".plan-note").textContent = b.note;
+      const a = ranked.find((x) => x.id === b.assignmentId);
+      el.querySelector(".start").addEventListener("click", () => a && smartStart(a, b.minutes));
+    }
+    wrap.appendChild(el);
+  }
+  for (const s of sacrifices) {
+    const el = document.createElement("div");
+    el.className = "sacrifice";
+    el.innerHTML = `<b>Sacrifice:</b> <span class="s-title"></span> — <span class="s-why"></span>`;
+    el.querySelector(".s-title").textContent = `${s.title} (${s.course})`;
+    el.querySelector(".s-why").textContent = s.why;
+    wrap.appendChild(el);
+  }
+}
+
+/* Avoidance detection — a friend noticing, never a guilt trip. */
+function renderAvoidance(meta, sessions) {
+  const card = $("avoid-card");
+  const avoided = FA.findAvoided(ranked, meta, sessions);
+  if (!avoided.length) {
+    card.classList.add("hidden");
+    return;
+  }
+  const { assignment, daysVisible, overdue } = avoided[0];
+  card.classList.remove("hidden");
+  $("avoid-text").textContent = overdue
+    ? `"${assignment.title}" slipped past its due date without a single session. That usually means it feels too big — not that you don't care. Smallest possible start?`
+    : `"${assignment.title}" has been sitting there ${daysVisible} day${daysVisible > 1 ? "s" : ""} and you haven't touched it. Usually that means it feels too big. Let's shrink it.`;
+  $("avoid-micro").onclick = () => smartStart(assignment, 2);
+}
+
+/** When a session is running and you're on the list, one tap gets you back. */
+async function renderResumeBanner() {
+  const s = await FA.store.getActiveSession();
+  const b = $("resume-banner");
+  if (!s) {
+    b.classList.add("hidden");
+    return;
+  }
+  const min = Math.floor((Date.now() - s.startedAt) / 60000);
+  b.textContent = `▶ back to "${s.title}" · ${min} min in`;
+  b.classList.remove("hidden");
+  b.onclick = async () => {
+    const a = ranked.find((x) => x.id === s.assignmentId) || assignments.find((x) => x.id === s.assignmentId);
+    await enterWork(a || { id: s.assignmentId, title: s.title, course: s.course, estMin: s.plannedMin });
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Smart Start: park what isn't needed, open what is, start the clock,
+ * and land in the work view with the coach already talking.
+ * ------------------------------------------------------------------ */
+async function buildSetupResources(a) {
+  return {
+    links: a.links || [],
+    topics: snapshot?.topics?.[a.sectionId] || [],
+    googleConnected: await FA.google.isConnected().catch(() => false),
+    description: a.description || "",
+  };
+}
+
+/** Execute a setup plan: open the chosen tabs, create the doc. Returns what happened. */
+async function executeSetupPlan(assignment, plan, resources) {
+  const opened = [];
+  for (const o of plan.opens || []) {
+    const target = o.kind === "link" ? resources.links[o.i] : resources.topics[o.i];
+    if (!target?.url) continue;
+    await chrome.tabs.create({ url: target.url, active: false });
+    opened.push({ label: (o.kind === "topic" ? "📖 " : "🔗 ") + (target.name || target.text || target.url), why: o.why });
+  }
+  if (plan.doc && resources.googleConnected) {
+    try {
+      const meta = await FA.store.getMeta();
+      let docUrl = meta?.[assignment.id]?.docUrl || null;
+      if (!docUrl) {
+        const steps = (current?.steps || []).map((s) => s.text);
+        const { id, url } = await FA.google.createOutlineDoc(assignment.title, assignment.course, steps.length ? steps : new FA.MockCoach().breakdown(assignment));
+        docUrl = url;
+        await FA.store.patchAssignmentMeta(assignment.id, { docUrl, docId: id });
+      }
+      await chrome.tabs.create({ url: docUrl, active: false });
+      opened.push({ label: "📄 your doc, outline ready", why: "" });
+    } catch (e) {
+      console.warn("[Focus Agent] setup doc failed (non-fatal):", e.message);
+    }
+  }
+  return opened;
+}
+
+/** The setup plan as the coach's opening message. */
+function setupMessage(plan, opened) {
+  const lines = [];
+  if (opened.length) lines.push(`opened: ${opened.map((o) => o.label).join(" · ")}`);
+  if (plan.gather?.length) lines.push(`have ready: ${plan.gather.join(" · ")}`);
+  lines.push(`🎯 your part: ${plan.focus}`);
+  if (plan.firstMove) lines.push(`▶ first move: ${plan.firstMove}`);
+  return lines.join("\n");
+}
+
+async function smartStart(assignment, minOverride) {
+  // 1. Park distracting tabs into a separate minimized window (reversible).
+  try {
+    const allTabs = await chrome.tabs.query({ currentWindow: true });
+    const distractors = allTabs.filter((t) => {
+      try {
+        return DISTRACTOR_PATTERNS.some((p) => p.test(new URL(t.url).hostname)) && !t.active;
+      } catch {
+        return false;
+      }
+    });
+    if (distractors.length) {
+      const parkingLot = await chrome.windows.create({ tabId: distractors[0].id, state: "minimized", focused: false });
+      if (distractors.length > 1) {
+        await chrome.tabs.move(distractors.slice(1).map((t) => t.id), { windowId: parkingLot.id, index: -1 });
+      }
+    }
+  } catch (e) {
+    console.warn("[Focus Agent] Tab parking failed (non-fatal):", e.message);
+  }
+
+  // 2. Start the clock and land in the work view immediately — everything
+  //    else streams in. Waiting on tabs or the brain is how starts die.
+  const active = await FA.store.getActiveSession();
+  if (active && active.assignmentId !== assignment.id) {
+    await FA.store.endSession("stop");
+    chrome.runtime.sendMessage({ type: "SESSION_ENDED" }).catch(() => {});
+  }
+  if (!active || active.assignmentId !== assignment.id) {
+    await startSession(assignment, minOverride);
+  }
+  await enterWork(assignment);
+
+  // 3. Smart Setup: read the instructions, open what they call for.
+  const resources = await buildSetupResources(assignment);
+  const meta = await FA.store.getMeta();
+  const plan = meta?.[assignment.id]?.setupPlan || new FA.MockCoach().setup(assignment, resources);
+
+  if (assignment.url) await chrome.tabs.create({ url: assignment.url, active: true });
+  let opened = [];
+  try {
+    opened = await executeSetupPlan(assignment, plan, resources);
+  } catch (e) {
+    console.warn("[Focus Agent] setup execution failed (non-fatal):", e.message);
+  }
+
+  // 4. The coach speaks first: the setup summary, then a question if it
+  //    isn't sure what the assignment wants.
+  await pushCoach(setupMessage(plan, opened), { kind: "setup" });
+  if ((plan.confidence ?? 1) < 0.6 && plan.missing?.length) {
+    await pushCoach(`Before we go — ${plan.missing[0]}?`, { kind: "question" });
+  }
+
+  // 5. Brain upgrade in the background: better plan + suggested extras as
+  //    click-to-open lines, never surprise tabs mid-session.
+  if (FA.coachBrain === "claude" && !plan.fromClaude) {
+    Promise.resolve(FA.coach.setup(assignment, resources))
+      .then(async (brainPlan) => {
+        if (!brainPlan.fromClaude || current?.assignment.id !== assignment.id) return;
+        await FA.store.patchAssignmentMeta(assignment.id, { setupPlan: brainPlan });
+        const alreadyOpened = new Set((plan.opens || []).map((o) => `${o.kind}:${o.i}`));
+        const extras = (brainPlan.opens || [])
+          .filter((o) => !alreadyOpened.has(`${o.kind}:${o.i}`))
+          .map((o) => (o.kind === "link" ? resources.links[o.i] : resources.topics[o.i]))
+          .filter((t) => t?.url);
+        let text = "🧠 " + setupMessage(brainPlan, opened);
+        if (extras.length) text += `\nmight help: ${extras.map((t) => t.name || t.text || t.url).join(" · ")}`;
+        await pushCoach(text, { kind: "setup", links: extras.map((t) => t.url) });
+        if ((brainPlan.confidence ?? 1) < 0.6 && brainPlan.missing?.length) {
+          await pushCoach(`Quick check — ${brainPlan.missing[0]}?`, { kind: "question" });
+        }
+      })
+      .catch(() => {});
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Sessions (the clock)
+ * ------------------------------------------------------------------ */
+async function startSession(assignment, minOverride) {
+  // Chunk = one sitting. Phase 3 replaces this clamp with the Ramp proposal
+  // from the student's measured focus history.
+  const plannedMin =
+    minOverride ??
+    (assignment?.estMin ? Math.min(Math.max(assignment.estMin, 15), 50) : settings.sessionMin || 25);
+  await FA.store.startSession(assignment, plannedMin);
+  chrome.runtime.sendMessage({ type: "SESSION_STARTED" }).catch(() => {});
+}
+
+/* ------------------------------------------------------------------ *
+ * STATE B — the work view
+ * ------------------------------------------------------------------ */
+async function enterWork(assignment) {
+  const meta = await FA.store.getMeta();
+  const m = meta?.[assignment.id] || {};
+  current = {
+    assignment,
+    steps: Array.isArray(m.steps) ? m.steps : [],
+    thread: Array.isArray(m.thread) ? m.thread : [],
+    awaitingDraft: false,
+  };
+
+  $("work-title").textContent = assignment.title;
+  $("work-meta").textContent = [assignment.course, dueLabel(assignment), assignment.estMin ? `~${assignment.estMin} min` : ""].filter(Boolean).join(" · ");
+  renderSteps();
+  renderThread();
+  showView("work");
+  await restoreClock();
+
+  // No checklist yet → build one (rules instantly, brain upgrades in place).
+  if (!current.steps.length) {
+    current.steps = new FA.MockCoach().breakdownSteps(assignment);
+    renderSteps();
+    await saveSteps();
+    if (FA.coachBrain === "claude") {
+      Promise.resolve(FA.coach.breakdownSteps(assignment))
+        .then(async (steps) => {
+          // Only replace an untouched rules checklist.
+          if (current?.assignment.id !== assignment.id || current.steps.some((s) => s.done || s.source === "user")) return;
+          current.steps = steps;
+          renderSteps();
+          await saveSteps();
+        })
+        .catch(() => {});
+    }
+  }
+}
+
+async function restoreClock() {
+  clearInterval(timerInterval);
+  const session = await FA.store.getActiveSession();
+  const moodRow = $("mood-row");
+  if (!session) {
+    $("work-elapsed").textContent = "—";
+    $("work-chunk").textContent = "no clock running";
+    $("chunk-fill").style.width = "0%";
+    moodRow.classList.add("hidden");
+    return;
+  }
+  if (!session.mood && !session.moodSkipped) {
+    moodRow.classList.remove("hidden");
+    $("mood-response").classList.add("hidden");
+  } else {
+    moodRow.classList.add("hidden");
+  }
+  const tick = () => {
+    const elapsed = Math.floor((Date.now() - session.startedAt) / 1000);
+    const mm = Math.floor(elapsed / 60);
+    const ss = String(elapsed % 60).padStart(2, "0");
+    $("work-elapsed").textContent = `${mm}:${ss}`;
+    const chunk = session.plannedMin * 60;
+    const pct = Math.min((elapsed / chunk) * 100, 100);
+    $("chunk-fill").style.width = pct.toFixed(1) + "%";
+    $("chunk-fill").classList.toggle("over", elapsed > chunk);
+    $("work-chunk").textContent =
+      elapsed <= chunk
+        ? `${Math.ceil((chunk - elapsed) / 60)} min left in this chunk`
+        : `past the ${session.plannedMin}-min chunk — finish the thought`;
+  };
+  tick();
+  timerInterval = setInterval(tick, 1000);
+}
+
+/* ---- checklist ---- */
+async function saveSteps() {
+  if (!current) return;
+  await FA.store.patchAssignmentMeta(current.assignment.id, { steps: current.steps });
+}
+
+function renderSteps() {
+  const wrap = $("steps");
+  wrap.innerHTML = "";
+  if (!current) return;
+  const steps = current.steps;
+  const doneCount = steps.filter((s) => s.done).length;
+  const head = document.createElement("div");
+  head.className = "steps-head";
+  head.innerHTML = `<span>checklist</span><span class="muted">${doneCount}/${steps.length}</span>`;
+  wrap.appendChild(head);
+
+  steps.forEach((s, i) => {
+    const row = document.createElement("div");
+    row.className = "step" + (s.done ? " done" : "") + (i === steps.findIndex((x) => !x.done) ? " current" : "");
+    row.innerHTML = `
+      <input type="checkbox" ${s.done ? "checked" : ""} title="done" />
+      <div class="step-body">
+        <div class="step-text" contenteditable="true" spellcheck="false"></div>
+        <div class="step-sub"><span class="step-est">${s.estMin} min</span>${s.deliverable ? ` · <span class="step-deliv"></span>` : ""}</div>
+      </div>
+      <button class="step-menu-btn" title="smaller · why · move · remove">⋯</button>`;
+    row.querySelector(".step-text").textContent = s.text;
+    if (s.deliverable) row.querySelector(".step-deliv").textContent = s.deliverable;
+
+    row.querySelector("input").addEventListener("change", async (e) => {
+      s.done = e.target.checked;
+      s.doneBy = s.done ? "user" : null;
+      s.doneAt = s.done ? Date.now() : null;
+      renderSteps();
+      await saveSteps();
+      if (s.done && current.steps.every((x) => x.done)) {
+        await pushCoach("Every step is checked. Hit done ✓ when it's turned in — or add what's left.", { kind: "nudge" });
+      }
+    });
+    const textEl = row.querySelector(".step-text");
+    textEl.addEventListener("blur", async () => {
+      const t = textEl.textContent.trim().slice(0, 160);
+      if (t && t !== s.text) {
+        s.text = t;
+        s.source = "user";
+        await saveSteps();
+      } else textEl.textContent = s.text;
+    });
+    textEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        textEl.blur();
+      }
+    });
+    row.querySelector(".step-menu-btn").addEventListener("click", () => toggleStepMenu(row, s, i));
+    wrap.appendChild(row);
+  });
+}
+
+function toggleStepMenu(row, step, i) {
+  const existing = row.querySelector(".step-menu");
+  document.querySelectorAll(".step-menu").forEach((m) => m.remove());
+  if (existing) return;
+  const menu = document.createElement("div");
+  menu.className = "step-menu";
+  menu.innerHTML = `
+    <button data-act="smaller" title="Split this into 2-3 smaller steps">smaller</button>
+    <button data-act="why" title="Why this step matters for the grade">why</button>
+    <button data-act="up" ${i === 0 ? "disabled" : ""}>↑</button>
+    <button data-act="down" ${i === current.steps.length - 1 ? "disabled" : ""}>↓</button>
+    <button data-act="remove" class="danger">remove</button>`;
+  row.appendChild(menu);
+  menu.addEventListener("click", async (e) => {
+    const act = e.target.dataset.act;
+    if (!act) return;
+    if (act === "smaller") {
+      menu.textContent = FA.coachBrain === "claude" ? "🧠 splitting…" : "…";
+      const subs = await Promise.resolve(FA.coach.splitStep(current.assignment, step));
+      current.steps.splice(i, 1, ...subs);
+    } else if (act === "why") {
+      menu.remove();
+      await sendWork(`Why does this step matter for the grade: "${step.text}"? One or two sentences.`);
+      return;
+    } else if (act === "up") {
+      [current.steps[i - 1], current.steps[i]] = [current.steps[i], current.steps[i - 1]];
+    } else if (act === "down") {
+      [current.steps[i + 1], current.steps[i]] = [current.steps[i], current.steps[i + 1]];
+    } else if (act === "remove") {
+      current.steps.splice(i, 1);
+    }
+    renderSteps();
+    await saveSteps();
+  });
+}
+
+$("step-input").addEventListener("keydown", async (e) => {
+  if (e.key !== "Enter" || !current) return;
+  const t = $("step-input").value.trim();
+  if (!t) return;
+  $("step-input").value = "";
+  current.steps.push(...FA.normalizeSteps([{ text: t, estMin: 10 }], current.assignment, "user"));
+  renderSteps();
+  await saveSteps();
+});
+
+/* ---- the assignment's chat thread ---- */
+async function saveThread() {
+  if (!current) return;
+  current.thread = current.thread.slice(-40);
+  await FA.store.patchAssignmentMeta(current.assignment.id, { thread: current.thread });
+}
+
+function renderThread() {
+  const wrap = $("work-messages");
+  wrap.innerHTML = "";
+  if (!current) return;
+  if (!current.thread.length) {
+    wrap.innerHTML = '<div class="empty-note small">the coach will set you up in a second…</div>';
+    return;
+  }
+  for (const m of current.thread) {
+    const el = document.createElement("div");
+    el.className = "msg " + (m.role === "user" ? "me" : "coach") + (m.kind ? ` k-${m.kind}` : "");
+    el.textContent = m.text;
+    if (m.links?.length) {
+      const row = document.createElement("div");
+      row.className = "msg-links";
+      for (const url of m.links) {
+        const b = document.createElement("button");
+        b.textContent = "+ open " + url.replace(/^https?:\/\//, "").slice(0, 34);
+        b.addEventListener("click", () => chrome.tabs.create({ url, active: false }));
+        row.appendChild(b);
+      }
+      el.appendChild(row);
+    }
+    wrap.appendChild(el);
+  }
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+async function pushCoach(text, extra = {}) {
+  if (!current) return;
+  current.thread.push({ role: "coach", text, at: Date.now(), ...extra });
+  renderThread();
+  await saveThread();
+}
+
+function showWorkTyping() {
+  const wrap = $("work-messages");
+  const el = document.createElement("div");
+  el.className = "msg coach";
+  el.id = "work-typing";
+  el.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+  wrap.appendChild(el);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+/** Read the Google Doc in the active tab, if there is one. */
+async function readOpenDoc() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.url && /docs\.google\.com\/document\/d\//.test(tab.url)) {
+      const d = await FA.google.readDoc(tab.url);
+      return { doc: { title: d.title || tab.title?.replace(/ - Google Docs$/, "") || "", text: d.text.slice(0, 30000), truncated: d.text.length > 30000 }, note: "" };
+    }
+  } catch (e) {
+    return { doc: null, note: `Couldn't read the open doc: ${e.message}` };
+  }
+  return { doc: null, note: "" };
+}
+
+async function sendWork(text) {
+  if (!current) return;
+  const msg = (text ?? $("work-input").value).trim();
+  if (!msg) return;
+  $("work-input").value = "";
+
+  // "check my draft" asked for a paste; this message IS the draft.
+  if (current.awaitingDraft && !text) {
+    current.awaitingDraft = false;
+    current.thread.push({ role: "user", text: msg.length > 400 ? msg.slice(0, 400) + "…" : msg, at: Date.now() });
+    renderThread();
+    await saveThread();
+    return runPrecheck(msg);
+  }
+
+  current.thread.push({ role: "user", text: msg, at: Date.now() });
+  renderThread();
+  await saveThread();
+  showWorkTyping();
+
+  const sessions = await FA.store.getSessions();
+  const weekAgo = Date.now() - 7 * 86400000;
+  const week = sessions.filter((s) => s.endedAt > weekAgo);
+  const { doc, note } = await readOpenDoc();
+  const session = await FA.store.getActiveSession();
+
+  const context = {
+    ranked,
+    brain: snapshot ? FA.snapshotForBrain(snapshot, { maxAssignments: 0 }) : null,
+    mode: settings.mode || "tutor",
+    doc,
+    docNote: note,
+    focus: {
+      assignment: current.assignment,
+      steps: current.steps,
+      elapsedMin: session ? Math.round((Date.now() - session.startedAt) / 60000) : 0,
+    },
+    stats: {
+      streak: FA.computeStreak(sessions),
+      sessionsThisWeek: week.length,
+      minutesThisWeek: week.reduce((a, s) => a + s.actualMin, 0),
+    },
+  };
+
+  const { reply } = await Promise.resolve(FA.coach.chat(current.thread, context));
+  $("work-typing")?.remove();
+  await pushCoach(reply);
+}
+
+/** 💡 Explain → a coach message. */
+async function explainToChat() {
+  const a = current.assignment;
+  showWorkTyping();
+  const brainCtx = snapshot ? FA.snapshotForBrain(snapshot, { maxAssignments: 0 }) : null;
+  const r = await Promise.resolve(FA.coach.explain(a, brainCtx));
+  $("work-typing")?.remove();
+  const lines = [(r.fromClaude ? "🧠 " : "") + r.tldr];
+  if (r.wants.length) lines.push("what the teacher wants:\n• " + r.wants.join("\n• "));
+  if (r.traps.length) lines.push("traps:\n• " + r.traps.join("\n• "));
+  lines.push(`▶ first move (~5 min): ${r.firstMove}\nwhole thing: ~${r.estMinutes} min`);
+  await pushCoach(lines.join("\n\n"), { kind: "explain" });
+}
+
+/** 🔍 Pre-check → reads the doc we know about, else asks for a paste. */
+async function precheckToChat() {
+  const meta = await FA.store.getMeta();
+  const docUrl = meta?.[current.assignment.id]?.docUrl;
+  let draft = "";
+  if (docUrl) {
+    try {
+      const d = await FA.google.readDoc(docUrl);
+      draft = d.text.trim();
+    } catch (e) {
+      await pushCoach(`Couldn't read your doc (${e.message}). Paste the draft here and I'll check it.`);
+      current.awaitingDraft = true;
+      return;
+    }
+  } else {
+    const { doc } = await readOpenDoc();
+    draft = doc?.text?.trim() || "";
+  }
+  if (draft.length < 20) {
+    await pushCoach("Paste your draft here (or open it in a Google Doc tab) and I'll check it against the assignment — pointers, not rewrites.");
+    current.awaitingDraft = true;
+    return;
+  }
+  return runPrecheck(draft);
+}
+
+async function runPrecheck(draft) {
+  showWorkTyping();
+  const r = await Promise.resolve(FA.coach.precheck(current.assignment, draft));
+  $("work-typing")?.remove();
+  const lines = [`${r.fromClaude ? "🧠 " : ""}estimate: ${r.grade}${r.fromClaude ? " (honest guess, not your teacher's grade)" : " — rules only; start the bridge for a real read"}`];
+  if (r.strengths.length) lines.push("working:\n• " + r.strengths.join("\n• "));
+  for (const i of r.issues) lines.push(`${i.quote ? `“${i.quote}”\n` : ""}${i.problem}\n→ ${i.hint}`);
+  if (r.missing.length) lines.push("not addressed yet:\n• " + r.missing.join("\n• "));
+  lines.push(`▶ ${r.nextStep}`);
+  await pushCoach(lines.join("\n\n"), { kind: "precheck" });
+}
+
+/** Chip commands inside the work view. */
+async function runChip(cmd) {
+  if (!current) return;
+  const cur = current.steps.find((s) => !s.done);
+  switch (cmd) {
+    case "explain":
+      return explainToChat();
+    case "breakdown": {
+      // Keep checked steps; regenerate the rest from the instructions.
+      showWorkTyping();
+      const fresh = await Promise.resolve(FA.coach.breakdownSteps(current.assignment));
+      $("work-typing")?.remove();
+      current.steps = [...current.steps.filter((s) => s.done), ...fresh];
+      renderSteps();
+      await saveSteps();
+      return pushCoach(`New checklist: ${fresh.length} steps, first one under 5 minutes. Edit anything that's wrong — tap ⋯ on a step for smaller.`);
+    }
+    case "precheck":
+      return precheckToChat();
+    case "stuck":
+      return sendWork(cur ? `I'm stuck on this step: "${cur.text}". What's the smallest next thing I can do?` : "I'm stuck. What's the smallest next thing I can do?");
+    case "more5": {
+      const s = await FA.store.getActiveSession();
+      if (!s) return startSession(current.assignment, 5).then(restoreClock);
+      await FA.store.updateActiveSession({ plannedMin: (s.plannedMin || 0) + 5 });
+      await restoreClock();
+      return pushCoach("+5. Same step, no new tabs.", { kind: "nudge" });
+    }
+    case "dev-write":
+      return sendWork(cur ? `[dev] Write this step for me, fully, ready to paste: "${cur.text}".` : "[dev] Write the next part for me, ready to paste.");
+    case "dev-answer":
+      return sendWork("[dev] Answer every question in this assignment fully, with work shown where it applies.");
+  }
+}
+
+/* ---- finishing ---- */
+async function finishWork(done) {
+  clearInterval(timerInterval);
+  timerInterval = null;
+  const a = current?.assignment;
+  const stepsDone = current?.steps.filter((s) => s.done).length || 0;
+  const stepsTotal = current?.steps.length || 0;
+
+  const record = await FA.store.endSession(done ? "user" : "stop", { stepsDone, stepsTotal });
+  chrome.runtime.sendMessage({ type: "SESSION_ENDED" }).catch(() => {});
+
+  if (done && a) {
+    await FA.store.markDone(a.id);
+    await FA.store.addQuestEvent(a, a.estMin);
+  }
+  await refreshAll();
+  renderDone(a, record, done);
+  showView("done");
+}
+
+/* ------------------------------------------------------------------ *
+ * STATE C — done
+ * ------------------------------------------------------------------ */
+async function renderDone(a, record, done) {
+  $("done-label").textContent = done ? "done ✓" : "stopped — logged";
+  $("done-title").textContent = a?.title || "Focus session";
+  const spent = record?.actualMin || 0;
+  const guess = a?.estMin;
+  $("done-stats").textContent = guess
+    ? `${spent} min this sitting · you guessed ~${guess} min for the whole thing`
+    : `${spent} min this sitting`;
+
+  const deb = $("done-debrief");
+  deb.textContent = "";
+  if (record) {
+    const sessions = await FA.store.getSessions();
+    const weekAgo = Date.now() - 7 * 86400000;
+    const week = sessions.filter((s) => s.endedAt > weekAgo);
+    const weekStats = {
+      sessions: week.length,
+      totalMin: week.reduce((x, s) => x + s.actualMin, 0),
+      avgDistractions: week.length ? Math.round((week.reduce((x, s) => x + (s.distractions || 0), 0) / week.length) * 10) / 10 : 0,
+    };
+    deb.textContent = new FA.MockCoach().debrief(record).line;
+    if (FA.coachBrain === "claude") {
+      Promise.resolve(FA.coach.debrief(record, weekStats)).then((d) => (deb.textContent = "🧠 " + d.line)).catch(() => {});
+    }
+  }
+
+  // What's next: the coach's pick, minus what we just finished.
+  const rest = ranked.filter((x) => x.id !== a?.id);
+  const next = $("done-next");
+  if (!rest.length) {
+    next.classList.add("hidden");
+  } else {
+    const { assignment, reason } = new FA.MockCoach().pick(rest);
+    next.classList.remove("hidden");
+    $("next-title").textContent = assignment.title;
+    $("next-meta").textContent = `${assignment.course} · ~${assignment.estMin} min — ${reason}`;
+    $("next-start").onclick = () => smartStart(assignment);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * ▸ MORE — classes, stats, XP, commitments, general chat, settings
  * ------------------------------------------------------------------ */
 function gradeClass(g) {
   if (g == null) return "none";
@@ -183,12 +947,10 @@ function renderClasses() {
   weekList.innerHTML = "";
 
   if (!snapshot) {
-    classList.innerHTML =
-      '<div class="empty-note">No portal data yet. Open your school portal with the extension on, then hit ↻.</div>';
+    classList.innerHTML = '<div class="empty-note">No portal data yet. Open your school portal with the extension on, then hit ↻.</div>';
     return;
   }
 
-  // --- classes + grades ---
   const academic = snapshot.classes.filter((c) => c.academic);
   for (const c of academic) {
     const gs = snapshot.grades[c.sectionId] || [];
@@ -199,10 +961,7 @@ function renderClasses() {
     el.className = "card";
     el.innerHTML = `
       <div class="class-row">
-        <div>
-          <div class="card-title"></div>
-          <div class="card-meta"></div>
-        </div>
+        <div><div class="card-title"></div><div class="card-meta"></div></div>
         <div class="class-grade ${gradeClass(c.grade)}"></div>
       </div>`;
     el.querySelector(".card-title").textContent = c.course;
@@ -213,18 +972,16 @@ function renderClasses() {
       missing ? `${missing} missing ⚠️` : "",
       trend.length ? "recent: " + trend.map((t) => `${Math.round(t.pct)}%`).join(" → ") : "",
     ].filter(Boolean).join(" · ");
-    el.querySelector(".class-grade").textContent =
-      c.grade != null ? `${Math.round(c.grade * 10) / 10}%` : "no grade yet";
+    el.querySelector(".class-grade").textContent = c.grade != null ? `${Math.round(c.grade * 10) / 10}%` : "no grade yet";
     classList.appendChild(el);
   }
   if (!academic.length) classList.innerHTML = '<div class="empty-note">No classes found in the portal.</div>';
 
-  // --- this week's schedule, grouped by day ---
   const byDay = new Map();
   for (const s of snapshot.schedule) {
     if (!s.start) continue;
     const d = new Date(s.start);
-    if (d < new Date(new Date().setHours(0, 0, 0, 0))) continue; // past days
+    if (d < new Date(new Date().setHours(0, 0, 0, 0))) continue;
     const key = d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
     if (!byDay.has(key)) byDay.set(key, []);
     byDay.get(key).push(s);
@@ -248,9 +1005,7 @@ function renderClasses() {
   }
   if (!byDay.size) weekList.innerHTML = '<div class="empty-note">Nothing on the schedule this week.</div>';
 
-  // --- phone notifications via the portal's own iCal feed ---
-  // Zero backend: Google/Apple Calendar subscribe to the feed and push
-  // reminders to the phone. The link is a private token — never displayed.
+  // Phone notifications via the portal's own iCal feed (zero backend).
   const link = snapshot.icalLink;
   const gcal = $("phone-gcal");
   const copy = $("phone-copy");
@@ -260,8 +1015,7 @@ function renderClasses() {
     gcal.classList.remove("hidden");
     copy.classList.remove("hidden");
     const webcal = link.replace(/^https?:/, "webcal:");
-    gcal.onclick = () =>
-      chrome.tabs.create({ url: `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}` });
+    gcal.onclick = () => chrome.tabs.create({ url: `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(webcal)}` });
     copy.onclick = async () => {
       try {
         await navigator.clipboard.writeText(link);
@@ -277,745 +1031,74 @@ function renderClasses() {
   }
 }
 
-/* ------------------------------------------------------------------ *
- * Avoidance detection — a friend noticing, never a guilt trip.
- * ------------------------------------------------------------------ */
-function renderAvoidance(meta, sessions) {
-  const card = $("avoid-card");
-  const avoided = FA.findAvoided(ranked, meta, sessions);
-  if (!avoided.length) {
-    card.classList.add("hidden");
-    return;
-  }
-
-  // One card, highest-urgency avoided item only — a list would be a wall of shame.
-  const { assignment, daysVisible, overdue } = avoided[0];
-  card.classList.remove("hidden");
-  $("avoid-text").textContent = overdue
-    ? `"${assignment.title}" slipped past its due date without a single session. That usually means it feels too big — not that you don't care. Smallest possible start?`
-    : `"${assignment.title}" has been sitting there ${daysVisible} day${daysVisible > 1 ? "s" : ""} and you haven't touched it. Usually that means it feels too big. Let's shrink it.`;
-
-  $("avoid-micro").onclick = async () => {
-    // 2-minute micro-start: make beginning nearly free — the research says
-    // the emotion changes after you start, so the job is just to start.
-    await smartStart(assignment, 2);
-  };
-  $("avoid-breakdown").onclick = () => {
-    switchTab("today");
-    const target = document.querySelector(`#today-list .card .plan-btn`);
-    // Find this assignment's card and open its breakdown.
-    for (const c of document.querySelectorAll("#today-list .card")) {
-      if (c.querySelector(".card-title")?.textContent === assignment.title) {
-        c.querySelector(".plan-btn")?.click();
-        c.scrollIntoView({ behavior: "smooth", block: "center" });
-        return;
-      }
-    }
-    target?.click();
-  };
-}
-
-/* ------------------------------------------------------------------ *
- * Renderers
- * ------------------------------------------------------------------ */
-
-function renderStreak(sessions) {
-  $("streak-badge").textContent = `🔥 ${FA.computeStreak(sessions)}`;
-}
-
-function renderForecast(meta, sessions) {
-  const { days, headline } = FA.buildForecast(assignments, meta, sessions);
-  const strip = $("forecast-strip");
-  strip.innerHTML = "";
-  for (const d of days) {
-    const el = document.createElement("div");
-    el.className = "forecast-day" + (d.label === "STORM" ? " storm" : "");
-    el.title = d.due.length
-      ? `${d.due.length} due (~${d.loadMin} min): ${d.due.map((a) => a.title).join(", ")}`
-      : "Nothing due";
-    el.innerHTML = `<div class="icon">${d.icon}</div><div class="name">${d.name}</div>`;
-    strip.appendChild(el);
-  }
-  // The source notice wins over the forecast line: "why am I seeing fake
-  // data" matters more than the weather when something's wrong.
-  $("forecast-headline").textContent = sourceNotice || headline;
-}
-
-function dueLabel(a) {
-  if (!a.dueDate) return "no due date";
-  const h = FA.hoursUntil(a.dueDate);
-  if (h < 0) return "OVERDUE";
-  if (h < 24) return "due today/tomorrow";
-  return `due ${new Date(a.dueDate).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`;
-}
-
-/* ------------------------------------------------------------------ *
- * Doc Starter: create the doc with structure ready to paste.
- * Google Docs renders in canvas, so we can't type into it directly
- * without OAuth (later upgrade). Instead: create the titled doc, put the
- * coach's outline on the clipboard, and it's one Cmd+V from structured.
- * ------------------------------------------------------------------ */
-async function startDoc(assignment, meta) {
-  const existing = meta?.[assignment.id]?.docUrl;
-  if (existing) {
-    await chrome.tabs.create({ url: existing, active: true });
-    return;
-  }
-
-  // Outline skeleton from the coach's breakdown.
-  const steps = FA.coach.breakdown(assignment);
-  const skeleton = [
-    assignment.title,
-    `${assignment.course} — due ${assignment.dueDate ? new Date(assignment.dueDate).toLocaleDateString() : "?"}`,
-    "",
-    ...steps.map((s, i) => `${i + 1}. ${s}\n\n`),
-  ].join("\n");
-
-  // With Google connected: create the doc with the outline already in it,
-  // styled (title/subtitle/numbered steps). No clipboard dance.
-  if (await FA.google.isConnected()) {
-    try {
-      const subtitle = `${assignment.course} — due ${assignment.dueDate ? new Date(assignment.dueDate).toLocaleDateString() : "?"}`;
-      const { id, url } = await FA.google.createOutlineDoc(assignment.title, subtitle, steps);
-      await FA.store.patchAssignmentMeta(assignment.id, { docUrl: url, docId: id });
-      await chrome.tabs.create({ url, active: true });
-      return;
-    } catch (e) {
-      console.warn("[Focus Agent] Docs API create failed, falling back to clipboard:", e.message);
-    }
-  }
-
-  try {
-    await navigator.clipboard.writeText(skeleton);
-  } catch {
-    /* clipboard can fail without focus; the doc still opens */
-  }
-
-  const url = `https://docs.google.com/document/create?title=${encodeURIComponent(assignment.title)}`;
-  const tab = await chrome.tabs.create({ url, active: true });
-
-  // The create URL redirects to the real /document/d/<id>/ URL — poll
-  // briefly so next time the button reopens the same doc.
-  let tries = 0;
-  const poll = setInterval(async () => {
-    tries++;
-    try {
-      const t = await chrome.tabs.get(tab.id);
-      const m = t.url?.match(/docs\.google\.com\/document\/d\/[\w-]+/);
-      if (m) {
-        clearInterval(poll);
-        await FA.store.patchAssignmentMeta(assignment.id, { docUrl: "https://" + m[0] + "/edit" });
-      }
-    } catch {
-      clearInterval(poll); // tab closed
-    }
-    if (tries > 20) clearInterval(poll);
-  }, 700);
-}
-
-/** Remove any open sub-panel of the given class on a card; true if one was open. */
-function closeBox(card, cls) {
-  const existing = card.querySelector("." + cls);
-  if (existing) {
-    existing.remove();
-    return true;
-  }
-  return false;
-}
-
-/** 💡 Explain: the assignment in plain language — what's wanted, traps, first move. */
-async function toggleExplain(card, a) {
-  if (closeBox(card, "explain-box")) return;
-  closeBox(card, "precheck-box");
-  const box = document.createElement("div");
-  box.className = "explain-box";
-  box.textContent = FA.coachBrain === "claude" ? "🧠 reading the assignment…" : "";
-  card.appendChild(box);
-
-  const brainCtx = snapshot ? FA.snapshotForBrain(snapshot, { maxAssignments: 0 }) : null;
-  const r = await Promise.resolve(FA.coach.explain(a, brainCtx));
-  const li = (arr) => arr.map((x) => `<li>${escapeHtml(x)}</li>`).join("");
-  box.innerHTML = `
-    <div class="tldr">${r.fromClaude ? "🧠 " : ""}${escapeHtml(r.tldr)}</div>
-    ${r.wants.length ? `<div class="muted small">what the teacher wants</div><ul>${li(r.wants)}</ul>` : ""}
-    ${r.traps.length ? `<div class="muted small">traps</div><ul>${li(r.traps)}</ul>` : ""}
-    <div class="first">▶ first move (~5 min): ${escapeHtml(r.firstMove)}<br><span class="muted small">whole thing: ~${r.estMinutes} min</span></div>`;
-}
-
-/**
- * 🔍 Pre-check: tutor feedback on a draft — pointers and questions, never rewrites.
- * Two ways in: paste text, or give a Google Docs link (reads it via the Docs
- * API once Google is connected). With a doc, feedback can be posted back as
- * COMMENTS anchored to the quoted sentences — the "annotate homework" feature.
- */
-function togglePrecheck(card, a) {
-  if (closeBox(card, "precheck-box")) return;
-  closeBox(card, "explain-box");
-  const box = document.createElement("div");
-  box.className = "precheck-box";
-  box.innerHTML = `
-    <div class="muted small">Paste your draft, or drop a Google Docs link. The coach checks it against the assignment and points at what to fix — it won't rewrite it for you.</div>
-    <input type="text" class="doc-link" placeholder="https://docs.google.com/document/d/…  (optional)" />
-    <textarea placeholder="…or paste your draft here"></textarea>
-    <div class="card-actions"><button class="start run-precheck">Check it</button></div>
-    <div class="result"></div>`;
-  card.appendChild(box);
-  const ta = box.querySelector("textarea");
-  const linkInput = box.querySelector(".doc-link");
-  const meta = { docId: null };
-  // Remember the doc this assignment lives in, so the link is prefilled next time.
-  FA.store.getMeta().then((m) => {
-    const url = m?.[a.id]?.docUrl;
-    if (url) linkInput.value = url;
-  });
-  (linkInput.value ? linkInput : ta).focus();
-
-  box.querySelector(".run-precheck").addEventListener("click", async () => {
-    const out = box.querySelector(".result");
-    let draft = ta.value.trim();
-    const link = linkInput.value.trim();
-
-    if (link) {
-      out.textContent = "📄 reading your doc…";
-      try {
-        const doc = await FA.google.readDoc(link);
-        draft = doc.text.trim();
-        meta.docId = doc.id;
-        ta.value = draft;
-        await FA.store.patchAssignmentMeta(a.id, { docUrl: `https://docs.google.com/document/d/${doc.id}/edit` });
-      } catch (e) {
-        out.textContent = /no token|OAuth2|not granted|canceled|disabled/i.test(e.message)
-          ? "Couldn't read it with your browser login, and Google isn't connected. Make sure you can open the doc in this Chrome profile."
-          : `Couldn't read that doc: ${e.message}`;
-        return;
-      }
-    }
-    if (draft.length < 20) {
-      out.textContent = "Paste a bit more than that (or check the doc link).";
-      return;
-    }
-
-    out.textContent = FA.coachBrain === "claude" ? "🧠 reading your draft… (10–20s)" : "";
-    const r = await Promise.resolve(FA.coach.precheck(a, draft));
-    const li = (arr) => arr.map((x) => `<li>${escapeHtml(x)}</li>`).join("");
-    out.innerHTML = `
-      <div style="margin:8px 0 4px"><span class="grade-pill">${escapeHtml(r.grade)}</span>${r.fromClaude ? "🧠 honest estimate — not your teacher's grade" : "rules only — start the bridge for a real read"}</div>
-      ${r.strengths.length ? `<div class="muted small">what's working</div><ul>${li(r.strengths)}</ul>` : ""}
-      ${r.issues.map((i) => `<div class="issue">${i.quote ? `<q>${escapeHtml(i.quote)}</q><br>` : ""}${escapeHtml(i.problem)}<br><b>→ ${escapeHtml(i.hint)}</b></div>`).join("")}
-      ${r.missing.length ? `<div class="muted small">not addressed yet</div><ul>${li(r.missing)}</ul>` : ""}
-      <div class="first" style="margin-top:6px">▶ ${escapeHtml(r.nextStep)}</div>
-      ${meta.docId && r.fromClaude ? '<div class="card-actions"><button class="post-comments">💬 Post as comments on the doc</button></div>' : ""}`;
-
-    out.querySelector(".post-comments")?.addEventListener("click", async (ev) => {
-      const btn = ev.currentTarget;
-      btn.disabled = true;
-      btn.textContent = "posting…";
-      try {
-        const n = await FA.google.postPrecheckComments(meta.docId, r);
-        btn.textContent = `✓ ${n} comments added — open the doc`;
-        btn.disabled = false;
-        btn.onclick = () => chrome.tabs.create({ url: `https://docs.google.com/document/d/${meta.docId}/edit` });
-      } catch (e) {
-        btn.textContent = `couldn't post: ${e.message}`;
-      }
-    });
-  });
-}
-
-function renderToday(sessions, meta = {}) {
-  // Instant pick from the rules, upgraded in place by the real brain when
-  // the bridge is up — the UI never waits on a 15s Claude call.
-  const box = $("coach-pick");
-  box.classList.remove("hidden");
-  const showPick = ({ assignment, reason }, fromClaude) => {
-    const prefix = fromClaude ? "🧠 " : "";
-    $("coach-pick-text").textContent = assignment
-      ? `${prefix}"${assignment.title}" — ${reason}`
-      : prefix + reason;
-  };
-  showPick(new FA.MockCoach().pick(ranked), false);
-  if (FA.coachBrain === "claude") {
-    Promise.resolve(FA.coach.pick(ranked)).then((p) => showPick(p, true)).catch(() => {});
-  }
-
-  const list = $("today-list");
-  list.innerHTML = "";
-  if (!ranked.length) {
-    list.innerHTML = '<div class="empty-note">Nothing pending.</div>';
-    return;
-  }
-
-  for (const a of ranked) {
-    const h = FA.hoursUntil(a.dueDate);
-    const card = document.createElement("div");
-    card.className = "card" + (h < 0 ? " overdue" : h < 30 ? " due-soon" : "");
-    const wantsDoc = a.type === "essay" || a.type === "project";
-    card.innerHTML = `
-      <div class="card-title"></div>
-      <div class="card-meta"></div>
-      <div class="card-actions">
-        <button class="start">▶ Smart Start</button>
-        ${wantsDoc ? '<button class="doc-btn"></button>' : ""}
-        <button class="plan-btn">Break it down</button>
-        <button class="explain-btn" title="What is the teacher actually asking for?">💡 Explain</button>
-        <button class="precheck-btn" title="Paste your draft — get tutor feedback before you turn it in">🔍 Pre-check</button>
-        <button class="done-btn">✓ Done</button>
-      </div>`;
-    card.querySelector(".card-title").textContent = a.title;
-    card.querySelector(".card-meta").textContent =
-      `${a.course} · ${dueLabel(a)} · ~${a.estMin} min` + (a.points ? ` · ${a.points} pts` : "");
-
-    card.querySelector(".start").addEventListener("click", () => smartStart(a));
-    if (wantsDoc) {
-      const docBtn = card.querySelector(".doc-btn");
-      docBtn.textContent = meta?.[a.id]?.docUrl ? "📄 Open your doc" : "📄 Start the doc";
-      docBtn.title = meta?.[a.id]?.docUrl
-        ? "Reopen the doc you started for this"
-        : "Creates a titled Google Doc + copies the outline — just paste";
-      docBtn.addEventListener("click", () => startDoc(a, meta));
-    }
-    card.querySelector(".done-btn").addEventListener("click", async () => {
-      await FA.store.markDone(a.id);
-      await FA.store.addQuestEvent(a, a.estMin); // quest complete = bonus XP
-      await refreshAll();
-    });
-    card.querySelector(".plan-btn").addEventListener("click", async () => {
-      const existing = card.querySelector(".breakdown");
-      if (existing) {
-        existing.remove();
-        return;
-      }
-      const div = document.createElement("div");
-      div.className = "breakdown card-meta";
-      div.style.marginTop = "8px";
-      div.textContent = FA.coachBrain === "claude" ? "🧠 breaking it down…" : "";
-      card.appendChild(div);
-      const steps = await Promise.resolve(FA.coach.breakdown(a));
-      div.innerHTML = steps.map((s, i) => `${i + 1}. ${escapeHtml(s)}`).join("<br>");
-    });
-
-    card.querySelector(".explain-btn").addEventListener("click", () => toggleExplain(card, a));
-    card.querySelector(".precheck-btn").addEventListener("click", () => togglePrecheck(card, a));
-
-    list.appendChild(card);
-  }
-}
-
-/* ------------------------------------------------------------------ *
- * Smart Start: open what's needed, park what isn't, start the clock.
- * ------------------------------------------------------------------ */
-/** The numbered inventory of safe resources Smart Setup may open. */
-async function buildSetupResources(a) {
-  return {
-    links: a.links || [],
-    topics: snapshot?.topics?.[a.sectionId] || [],
-    googleConnected: await FA.google.isConnected().catch(() => false),
-    description: a.description || "",
-  };
-}
-
-/** Execute a setup plan: open the chosen tabs, create the doc. Returns what happened. */
-async function executeSetupPlan(assignment, plan, resources) {
-  const opened = [];
-  for (const o of plan.opens || []) {
-    const target = o.kind === "link" ? resources.links[o.i] : resources.topics[o.i];
-    if (!target?.url) continue;
-    await chrome.tabs.create({ url: target.url, active: false });
-    opened.push({ label: (o.kind === "topic" ? "📖 " : "🔗 ") + (target.name || target.text || target.url), why: o.why });
-  }
-  let docUrl = null;
-  if (plan.doc && resources.googleConnected) {
-    try {
-      const meta = await FA.store.getMeta();
-      docUrl = meta?.[assignment.id]?.docUrl || null;
-      if (!docUrl) {
-        const steps = FA.coach.breakdown ? await Promise.resolve(new FA.MockCoach().breakdown(assignment)) : [];
-        const { url } = await FA.google.createOutlineDoc(assignment.title, assignment.course, steps);
-        docUrl = url;
-        await FA.store.patchAssignmentMeta(assignment.id, { docUrl });
-      }
-      await chrome.tabs.create({ url: docUrl, active: false });
-      opened.push({ label: "📄 your doc, outline ready", why: "" });
-    } catch (e) {
-      console.warn("[Focus Agent] setup doc failed (non-fatal):", e.message);
-    }
-  }
-  return opened;
-}
-
-/** Render the "what I set up / what's yours" card in the Timer view. */
-function renderSetupSummary(plan, opened, resources, assignment) {
-  const box = $("setup-summary");
-  const rows = [];
-  if (opened.length) {
-    rows.push(`<div class="su-row"><b>opened:</b> ${opened.map((o) => escapeHtml(o.label)).join(" · ")}</div>`);
-  }
-  if (plan.gather?.length) {
-    rows.push(`<div class="su-row"><b>have ready:</b> ${plan.gather.map(escapeHtml).join(" · ")}</div>`);
-  }
-  rows.push(`<div class="su-focus">🎯 your part: ${escapeHtml(plan.focus)}</div>`);
-  if (plan.firstMove) rows.push(`<div class="su-row">▶ first move: ${escapeHtml(plan.firstMove)}</div>`);
-  box.innerHTML = `<div class="su-label">${plan.fromClaude ? "🧠 " : ""}setup</div>${rows.join("")}<div class="su-extra"></div>`;
-  box.classList.remove("hidden");
-
-  // Extra suggestions from the async brain arrive as click-to-open buttons —
-  // never as surprise tabs mid-session.
-  box.renderExtras = (extraOpens) => {
-    const wrap = box.querySelector(".su-extra");
-    wrap.innerHTML = "";
-    for (const o of extraOpens) {
-      const target = o.kind === "link" ? resources.links[o.i] : resources.topics[o.i];
-      if (!target?.url) continue;
-      const btn = document.createElement("button");
-      btn.textContent = "+ open " + (target.name || target.text || "resource").slice(0, 40);
-      btn.title = o.why || "";
-      btn.addEventListener("click", () => chrome.tabs.create({ url: target.url, active: false }));
-      wrap.appendChild(btn);
-    }
-  };
-}
-
-async function smartStart(assignment, minOverride) {
-  // 1. Park distracting tabs into a separate minimized window (reversible —
-  //    nothing is closed, the tabs just get out of the way).
-  try {
-    const allTabs = await chrome.tabs.query({ currentWindow: true });
-    const distractors = allTabs.filter((t) => {
-      try {
-        return DISTRACTOR_PATTERNS.some((p) => p.test(new URL(t.url).hostname)) && !t.active;
-      } catch {
-        return false;
-      }
-    });
-    if (distractors.length) {
-      const parkingLot = await chrome.windows.create({
-        tabId: distractors[0].id,
-        state: "minimized",
-        focused: false,
-      });
-      if (distractors.length > 1) {
-        await chrome.tabs.move(distractors.slice(1).map((t) => t.id), {
-          windowId: parkingLot.id,
-          index: -1,
-        });
-      }
-    }
-  } catch (e) {
-    console.warn("[Focus Agent] Tab parking failed (non-fatal):", e.message);
-  }
-
-  // 2. Smart Setup: read the instructions, open what they call for.
-  //    Rules plan runs INSTANTLY (cached brain plan when we have one);
-  //    the brain upgrades the summary + suggests extras asynchronously.
-  const resources = await buildSetupResources(assignment);
-  const meta = await FA.store.getMeta();
-  let plan = meta?.[assignment.id]?.setupPlan || new FA.MockCoach().setup(assignment, resources);
-
-  // 3. Open the assignment itself (active), then the planned resources.
-  if (assignment.url) {
-    await chrome.tabs.create({ url: assignment.url, active: true });
-  }
-  let opened = [];
-  try {
-    opened = await executeSetupPlan(assignment, plan, resources);
-  } catch (e) {
-    console.warn("[Focus Agent] setup execution failed (non-fatal):", e.message);
-  }
-
-  // 4. Start the focus session and show what got set up.
-  await startSession(assignment, minOverride);
-  switchTab("timer");
-  renderSetupSummary(plan, opened, resources, assignment);
-
-  // 5. Brain upgrade in the background: better summary + extra suggestions
-  //    (rendered as buttons — the async brain never opens tabs by itself).
-  if (FA.coachBrain === "claude" && !plan.fromClaude) {
-    Promise.resolve(FA.coach.setup(assignment, resources))
-      .then(async (brainPlan) => {
-        if (!brainPlan.fromClaude) return;
-        await FA.store.patchAssignmentMeta(assignment.id, { setupPlan: brainPlan });
-        const alreadyOpened = new Set((plan.opens || []).map((o) => `${o.kind}:${o.i}`));
-        const extras = (brainPlan.opens || []).filter((o) => !alreadyOpened.has(`${o.kind}:${o.i}`));
-        renderSetupSummary(brainPlan, opened, resources, assignment);
-        $("setup-summary").renderExtras?.(extras);
-      })
-      .catch(() => {});
-  }
-}
-
-/* ------------------------------------------------------------------ *
- * Timer / sessions
- * ------------------------------------------------------------------ */
-async function startSession(assignment, minOverride) {
-  const settings = await FA.store.getSettings();
-  const plannedMin =
-    minOverride ??
-    (assignment?.estMin
-      ? Math.min(Math.max(assignment.estMin, 15), 50) // one sitting: 15-50 min
-      : settings.sessionMin);
-
-  await FA.store.startSession(
-    assignment ?? { id: "free", title: "Free focus session", course: "" },
-    plannedMin
-  );
-  chrome.runtime.sendMessage({ type: "SESSION_STARTED" }).catch(() => {});
-  await restoreTimerIfActive();
-}
-
-async function endSession(abandon = false) {
-  clearInterval(timerInterval);
-  timerInterval = null;
-
-  let record = null;
-  if (abandon) {
-    // Abandoned sessions vanish — no XP, no session record, no shame spiral.
-    await chrome.storage.local.set({ activeSession: null });
-  } else {
-    record = await FA.store.endSession(); // records session + time-spent (XP source)
-  }
-  chrome.runtime.sendMessage({ type: "SESSION_ENDED" }).catch(() => {});
-
-  $("timer-active").classList.add("hidden");
-  $("timer-idle").classList.remove("hidden");
-  $("setup-summary").classList.add("hidden");
-  await refreshAll();
-
-  // Session debrief: the coach reacts to what actually happened.
-  if (record) showDebrief(record);
-}
-
-/** One closing line from the coach after a real session. */
-async function showDebrief(record) {
-  const toast = $("debrief-toast");
-  const sessions = await FA.store.getSessions();
+function renderStats(sessions, commitments) {
   const weekAgo = Date.now() - 7 * 86400000;
-  const week = sessions.filter((s) => s.endedAt > weekAgo);
-  const weekStats = {
-    sessions: week.length,
-    totalMin: week.reduce((a, s) => a + s.actualMin, 0),
-    avgDistractions:
-      week.length ? Math.round((week.reduce((a, s) => a + (s.distractions || 0), 0) / week.length) * 10) / 10 : 0,
-  };
+  const thisWeek = sessions.filter((s) => s.endedAt > weekAgo);
+  const weekMin = thisWeek.reduce((a, s) => a + s.actualMin, 0);
 
-  const show = ({ line }, fromClaude) => {
-    toast.textContent = (fromClaude ? "🧠 " : "") + line;
-    toast.classList.remove("hidden");
-  };
-  show(new FA.MockCoach().debrief(record), false);
-  if (FA.coachBrain === "claude") {
-    Promise.resolve(FA.coach.debrief(record, weekStats)).then((d) => show(d, true)).catch(() => {});
+  $("stat-cards").innerHTML = "";
+  const cards = [
+    { value: FA.computeStreak(sessions), label: "day streak" },
+    { value: Math.round(weekMin / 6) / 10, label: "hrs this week" },
+    { value: sessions.length, label: "total sessions" },
+  ];
+  for (const c of cards) {
+    const el = document.createElement("div");
+    el.className = "stat-card";
+    el.innerHTML = `<div class="stat-value">${c.value}</div><div class="stat-label">${c.label}</div>`;
+    $("stat-cards").appendChild(el);
   }
-  setTimeout(() => toast.classList.add("hidden"), 20000);
-}
 
-/** Rebuild the ticking clock from storage (survives panel close/reopen). */
-async function restoreTimerIfActive() {
-  const session = await FA.store.getActiveSession();
-  if (!session) return;
+  const autopsy = $("autopsy");
+  const renderInsights = (lines, fromClaude) => {
+    autopsy.innerHTML = "";
+    for (const line of lines) {
+      const el = document.createElement("div");
+      el.className = "insight";
+      el.textContent = (fromClaude ? "🧠 " : "") + line;
+      autopsy.appendChild(el);
+    }
+  };
+  renderInsights(new FA.MockCoach().autopsy(sessions, commitments), false);
+  if (FA.coachBrain === "claude" && sessions.length >= 3) {
+    Promise.resolve(FA.coach.autopsy(sessions, commitments)).then((lines) => renderInsights(lines, true)).catch(() => {});
+  }
 
-  $("timer-idle").classList.add("hidden");
-  $("timer-active").classList.remove("hidden");
-  $("timer-task").textContent = session.title + (session.course ? ` · ${session.course}` : "");
-
-  // Feeling check-in: one optional tap, only until answered or skipped.
-  const moodRow = $("mood-row");
-  const moodResp = $("mood-response");
-  if (!session.mood && !session.moodSkipped) {
-    moodRow.classList.remove("hidden");
-    moodResp.classList.add("hidden");
+  $("chart-daily").innerHTML = FA.barChart(FA.minutesPerDay(sessions, 14), { unit: " min" });
+  $("chart-hours").innerHTML = FA.barChart(FA.sessionsByHour(sessions), { unit: " min", color: "#6ee7a8" });
+  const trend = FA.distractionTrend(sessions, 10);
+  $("chart-distract-trend").innerHTML = trend.length >= 2
+    ? FA.lineChart(trend, { color: "#fb7185" })
+    : '<div class="empty-note small">Log a few sessions and this fills in.</div>';
+  const sites = FA.distractionsBySite(sessions);
+  if (sites.length) {
+    $("chart-distract-sites").innerHTML = FA.hbarChart(sites, { unit: "×" });
+    const worst = sites[0];
+    const totalCost = sites.reduce((a, s) => a + s.costMin, 0);
+    $("distract-cost").textContent = `${worst.label} is your #1 offender (${worst.value}×). Estimated total refocus cost: ~${totalCost} min.`;
   } else {
-    moodRow.classList.add("hidden");
-  }
-
-  clearInterval(timerInterval);
-  const RING_C = 603.19; // 2π × r(96), must match panel.css stroke-dasharray
-  const ring = $("ring-fg");
-  const tick = () => {
-    const elapsed = Math.floor((Date.now() - session.startedAt) / 1000);
-    const target = session.plannedMin * 60;
-    const left = target - elapsed;
-    const abs = Math.abs(left);
-    const mm = String(Math.floor(abs / 60)).padStart(2, "0");
-    const ss = String(abs % 60).padStart(2, "0");
-    $("timer-clock").textContent = (left < 0 ? "+" : "") + `${mm}:${ss}`;
-    $("timer-sub").textContent =
-      left >= 0
-        ? `planned ${session.plannedMin} min · distractions: ${session.distractions || 0}`
-        : `overtime — nothing wrong with finishing the thought`;
-
-    // The ring drains as the session runs; overtime turns it amber and full.
-    if (ring) {
-      if (left >= 0) {
-        ring.classList.remove("overtime");
-        ring.style.strokeDashoffset = (RING_C * Math.min(elapsed / target, 1)).toFixed(1);
-      } else {
-        ring.classList.add("overtime");
-        ring.style.strokeDashoffset = 0;
-      }
-    }
-  };
-  tick();
-  timerInterval = setInterval(tick, 1000);
-}
-
-/* ------------------------------------------------------------------ *
- * Chat with the coach
- * ------------------------------------------------------------------ */
-let chatHistory = [];
-
-async function loadChat() {
-  const obj = await chrome.storage.local.get("chatHistory");
-  chatHistory = obj.chatHistory || [];
-  renderChatMessages();
-}
-
-/** Small grey status line in the chat stream (not stored in history). */
-function appendSystemLine(text) {
-  const wrap = $("chat-messages");
-  const el = document.createElement("div");
-  el.className = "msg system muted small";
-  el.textContent = text;
-  wrap.appendChild(el);
-  wrap.scrollTop = wrap.scrollHeight;
-}
-
-function renderChatMessages() {
-  const wrap = $("chat-messages");
-  wrap.innerHTML = "";
-  if (!chatHistory.length) {
-    wrap.innerHTML =
-      '<div class="empty-note">talk to your coach — it knows your assignments, your pace and your week.</div>';
-  }
-  for (const m of chatHistory) {
-    const el = document.createElement("div");
-    el.className = "msg " + (m.role === "user" ? "me" : "coach");
-    el.textContent = m.text;
-    wrap.appendChild(el);
-  }
-  wrap.scrollTop = wrap.scrollHeight;
-}
-
-function showTyping() {
-  const wrap = $("chat-messages");
-  const el = document.createElement("div");
-  el.className = "msg coach";
-  el.id = "typing-msg";
-  el.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
-  wrap.appendChild(el);
-  wrap.scrollTop = wrap.scrollHeight;
-}
-
-async function sendChat(text) {
-  const msg = (text ?? $("chat-input").value).trim();
-  if (!msg) return;
-  $("chat-input").value = "";
-
-  chatHistory.push({ role: "user", text: msg, at: Date.now() });
-  renderChatMessages();
-  showTyping();
-
-  const sessions = await FA.store.getSessions();
-  const weekAgo = Date.now() - 7 * 86400000;
-  const week = sessions.filter((s) => s.endedAt > weekAgo);
-  // Eyes: if the active tab is a Google Doc and Google is connected, read it
-  // so the coach can talk about what's actually on screen.
-  let doc = null;
-  let docNote = "";
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.url && /docs\.google\.com\/document\/d\//.test(tab.url)) {
-      // readDoc tries the cookie-based export first (no Google sign-in
-      // needed), then the Docs API if Google is connected.
-      const d = await FA.google.readDoc(tab.url);
-      doc = { title: d.title || tab.title?.replace(/ - Google Docs$/, "") || "", text: d.text.slice(0, 30000), truncated: d.text.length > 30000 };
-    }
-  } catch (e) {
-    docNote = `Couldn't read the open doc: ${e.message}`;
-  }
-  // Show the read status in the chat itself — the student shouldn't have to
-  // guess whether the coach can see the doc.
-  if (doc) {
-    appendSystemLine(`📄 reading "${doc.title || "the open doc"}" (${doc.text.length.toLocaleString()} chars${doc.truncated ? ", truncated" : ""})`);
-  } else if (docNote) {
-    appendSystemLine(`⚠️ ${docNote}`);
-  }
-
-  const settings = await FA.store.getSettings();
-  const context = {
-    ranked,
-    brain: snapshot ? FA.snapshotForBrain(snapshot, { maxAssignments: 0 }) : null,
-    mode: settings.mode || "tutor",
-    doc,
-    docNote,
-    stats: {
-      streak: FA.computeStreak(sessions),
-      sessionsThisWeek: week.length,
-      minutesThisWeek: week.reduce((a, s) => a + s.actualMin, 0),
-    },
-  };
-
-  const { reply } = await Promise.resolve(FA.coach.chat(chatHistory, context));
-  document.getElementById("typing-msg")?.remove();
-  chatHistory.push({ role: "coach", text: reply, at: Date.now() });
-  chatHistory = chatHistory.slice(-40); // cap stored history
-  await chrome.storage.local.set({ chatHistory });
-  renderChatMessages();
-}
-
-/* ------------------------------------------------------------------ *
- * Panic Button
- * ------------------------------------------------------------------ */
-async function renderPanicPlan() {
-  const minutes = parseInt($("panic-minutes").value, 10) || 120;
-  const wrap = $("panic-plan");
-  if (FA.coachBrain === "claude") {
-    wrap.innerHTML = '<div class="pep">🧠 Triaging your night with the real brain… (~15s)</div>';
-  }
-  const { blocks, sacrifices, pep } = await Promise.resolve(FA.coach.panicPlan(ranked, minutes));
-  wrap.innerHTML = "";
-
-  const pepEl = document.createElement("div");
-  pepEl.className = "pep";
-  pepEl.textContent = pep;
-  wrap.appendChild(pepEl);
-
-  for (const b of blocks) {
-    const el = document.createElement("div");
-    el.className = "plan-block" + (b.isBreak ? " break-block" : "");
-    if (b.isBreak) {
-      el.textContent = `☕ ${b.title} (${b.minutes} min)`;
-    } else {
-      el.innerHTML = `<span class="plan-time"></span><span><span class="plan-title"></span><br><span class="plan-note"></span></span>`;
-      el.querySelector(".plan-time").textContent = `${b.start}–${b.end}`;
-      el.querySelector(".plan-title").textContent = `${b.title} (${b.course})`;
-      el.querySelector(".plan-note").textContent = b.note;
-    }
-    wrap.appendChild(el);
-  }
-
-  for (const s of sacrifices) {
-    const el = document.createElement("div");
-    el.className = "sacrifice";
-    el.innerHTML = `<b>Sacrifice:</b> <span class="s-title"></span> — <span class="s-why"></span>`;
-    el.querySelector(".s-title").textContent = `${s.title} (${s.course})`;
-    el.querySelector(".s-why").textContent = s.why;
-    wrap.appendChild(el);
+    $("chart-distract-sites").innerHTML = '<div class="empty-note small">No distractions logged yet.</div>';
+    $("distract-cost").textContent = "";
   }
 }
 
-/* ------------------------------------------------------------------ *
- * Commitments
- * ------------------------------------------------------------------ */
+function renderLevel(sessions, questEvents) {
+  const xp = FA.totalXp(sessions, questEvents);
+  const { level, progress, needed } = FA.levelFor(xp);
+  $("level-box").innerHTML = `
+    <div class="level-title">Level ${level} · ${xp} XP</div>
+    <div class="xp-bar"><div class="xp-fill" style="width:${Math.min((progress / needed) * 100, 100)}%"></div></div>
+    <div class="xp-sub">${needed - progress} XP to level ${level + 1} — 1 focused minute = 1 XP</div>`;
+}
+
 async function addCommitment() {
   const text = $("commit-text").value.trim();
-  const time = $("commit-time").value; // "16:00"
+  const time = $("commit-time").value;
   if (!text || !time) return;
-
   const [hh, mm] = time.split(":").map(Number);
   const due = new Date();
   due.setHours(hh, mm, 0, 0);
-  if (due < new Date()) due.setDate(due.getDate() + 1); // past time = tomorrow
-
+  if (due < new Date()) due.setDate(due.getDate() + 1);
   await FA.store.addCommitment(text, due.getTime());
   $("commit-text").value = "";
   await refreshAll();
@@ -1043,175 +1126,90 @@ function renderCommitments(commitments) {
   }
 }
 
-/* ------------------------------------------------------------------ *
- * Stats + Autopsy
- * ------------------------------------------------------------------ */
-function renderStats(sessions, commitments) {
+/* ---- general chat (not tied to one assignment) ---- */
+let chatHistory = [];
+
+async function loadChat() {
+  const obj = await chrome.storage.local.get("chatHistory");
+  chatHistory = obj.chatHistory || [];
+  renderChatMessages();
+}
+
+function renderChatMessages() {
+  const wrap = $("chat-messages");
+  wrap.innerHTML = "";
+  if (!chatHistory.length) {
+    wrap.innerHTML = '<div class="empty-note small">the coach knows your assignments, your pace and your week.</div>';
+  }
+  for (const m of chatHistory) {
+    const el = document.createElement("div");
+    el.className = "msg " + (m.role === "user" ? "me" : "coach");
+    el.textContent = m.text;
+    wrap.appendChild(el);
+  }
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+async function sendChat(text) {
+  const msg = (text ?? $("chat-input").value).trim();
+  if (!msg) return;
+  $("chat-input").value = "";
+  chatHistory.push({ role: "user", text: msg, at: Date.now() });
+  renderChatMessages();
+
+  const wrap = $("chat-messages");
+  const typing = document.createElement("div");
+  typing.className = "msg coach";
+  typing.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+  wrap.appendChild(typing);
+
+  const sessions = await FA.store.getSessions();
   const weekAgo = Date.now() - 7 * 86400000;
-  const thisWeek = sessions.filter((s) => s.endedAt > weekAgo);
-  const weekMin = thisWeek.reduce((a, s) => a + s.actualMin, 0);
-
-  $("stat-cards").innerHTML = "";
-  const cards = [
-    { value: FA.computeStreak(sessions), label: "day streak" },
-    { value: Math.round(weekMin / 6) / 10, label: "hrs this week" },
-    { value: sessions.length, label: "total sessions" },
-  ];
-  for (const c of cards) {
-    const el = document.createElement("div");
-    el.className = "stat-card";
-    el.innerHTML = `<div class="stat-value">${c.value}</div><div class="stat-label">${c.label}</div>`;
-    $("stat-cards").appendChild(el);
-  }
-
-  // Autopsy: instant rules version, upgraded in place by the real brain.
-  const autopsy = $("autopsy");
-  const renderInsights = (lines, fromClaude) => {
-    autopsy.innerHTML = "";
-    for (const line of lines) {
-      const el = document.createElement("div");
-      el.className = "insight";
-      el.textContent = (fromClaude ? "🧠 " : "") + line;
-      autopsy.appendChild(el);
-    }
+  const week = sessions.filter((s) => s.endedAt > weekAgo);
+  const { doc, note } = await readOpenDoc();
+  const context = {
+    ranked,
+    brain: snapshot ? FA.snapshotForBrain(snapshot, { maxAssignments: 0 }) : null,
+    mode: settings.mode || "tutor",
+    doc,
+    docNote: note,
+    stats: {
+      streak: FA.computeStreak(sessions),
+      sessionsThisWeek: week.length,
+      minutesThisWeek: week.reduce((a, s) => a + s.actualMin, 0),
+    },
   };
-  renderInsights(new FA.MockCoach().autopsy(sessions, commitments), false);
-  if (FA.coachBrain === "claude" && sessions.length >= 3) {
-    Promise.resolve(FA.coach.autopsy(sessions, commitments))
-      .then((lines) => renderInsights(lines, true))
-      .catch(() => {});
-  }
-
-  renderCharts(sessions);
-}
-
-/** The v0.3 analytics: real charts from real on-device data. */
-function renderCharts(sessions) {
-  // Focus trends
-  $("chart-daily").innerHTML = FA.barChart(FA.minutesPerDay(sessions, 14), { unit: " min" });
-  $("chart-hours").innerHTML = FA.barChart(FA.sessionsByHour(sessions), { unit: " min", color: "#6ee7a8" });
-
-  // Distraction analytics
-  const trend = FA.distractionTrend(sessions, 10);
-  $("chart-distract-trend").innerHTML = trend.length >= 2
-    ? FA.lineChart(trend, { color: "#fb7185" })
-    : '<div class="empty-note small">Log a few sessions and this fills in.</div>';
-
-  const sites = FA.distractionsBySite(sessions);
-  if (sites.length) {
-    $("chart-distract-sites").innerHTML = FA.hbarChart(sites, { unit: "×" });
-    const worst = sites[0];
-    const totalCost = sites.reduce((a, s) => a + s.costMin, 0);
-    $("distract-cost").textContent =
-      `${worst.label} is your #1 offender (${worst.value}×). Estimated total refocus cost: ~${totalCost} min.`;
-  } else {
-    $("chart-distract-sites").innerHTML = '<div class="empty-note small">No distractions logged. Either you\'re a machine or you haven\'t run a session yet.</div>';
-    $("distract-cost").textContent = "";
-  }
+  const { reply } = await Promise.resolve(FA.coach.chat(chatHistory, context));
+  typing.remove();
+  chatHistory.push({ role: "coach", text: reply, at: Date.now() });
+  chatHistory = chatHistory.slice(-40);
+  await chrome.storage.local.set({ chatHistory });
+  renderChatMessages();
 }
 
 /* ------------------------------------------------------------------ *
- * Quests + Boss battles
+ * Wiring
  * ------------------------------------------------------------------ */
-function renderQuests(meta, sessions, questEvents) {
-  const xp = FA.totalXp(sessions, questEvents);
-  const { level, progress, needed } = FA.levelFor(xp);
-  $("level-box").innerHTML = `
-    <div class="level-title">Level ${level} · ${xp} XP</div>
-    <div class="xp-bar"><div class="xp-fill" style="width:${Math.min((progress / needed) * 100, 100)}%"></div></div>
-    <div class="xp-sub">${needed - progress} XP to level ${level + 1} — 1 focused minute = 1 XP</div>`;
-
-  // Bosses
-  const bosses = FA.findBosses(assignments, meta, sessions);
-  const bossList = $("boss-list");
-  bossList.innerHTML = "";
-  if (!bosses.length) {
-    bossList.innerHTML = '<div class="empty-note small">No bosses on the horizon. (Tests on your portal show up here.)</div>';
-  }
-  for (const b of bosses) {
-    const pct = b.maxHp ? (b.hp / b.maxHp) * 100 : 0;
-    const el = document.createElement("div");
-    el.className = "boss";
-    el.innerHTML = `
-      <div class="boss-name">⚔️ <span class="b-name"></span></div>
-      <div class="boss-due"></div>
-      <div class="hp-bar"><div class="hp-fill" style="width:${pct}%"></div></div>
-      <div class="hp-label">HP ${b.hp}/${b.maxHp}</div>
-      <div class="boss-hint">Damage it: finish its lead-up work (${b.doneLeadUps}/${b.leadUps.length} done) and log study sessions for ${b.test.course} (${b.studySessions}/2).</div>`;
-    el.querySelector(".b-name").textContent = b.test.title;
-    el.querySelector(".boss-due").textContent = `${b.test.course} · ${dueLabel(b.test)}`;
-    bossList.appendChild(el);
-  }
-
-  // Quest board = remaining assignments with XP bounties
-  const questList = $("quest-list");
-  questList.innerHTML = "";
-  for (const a of ranked) {
-    const el = document.createElement("div");
-    el.className = "card commit-item";
-    el.innerHTML = `<span class="q-title small"></span><span class="quest-xp">+${a.estMin} XP</span>`;
-    el.querySelector(".q-title").textContent = `${a.title} (${a.course})`;
-    questList.appendChild(el);
-  }
-}
-
-/* ------------------------------------------------------------------ *
- * Tabs + wiring
- * ------------------------------------------------------------------ */
-function switchTab(name) {
-  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
-  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === `tab-${name}`));
-}
-
-document.querySelectorAll(".tab").forEach((t) =>
-  t.addEventListener("click", () => switchTab(t.dataset.tab))
-);
-
-$("mode-select").addEventListener("change", async (e) => {
-  await FA.store.setSettings({ mode: e.target.value });
+$("more-btn").addEventListener("click", async () => {
+  if (view === "more") {
+    const s = await FA.store.getActiveSession();
+    showView(s && current ? "work" : "list");
+  } else showView("more");
 });
-$("source-select").addEventListener("change", async (e) => {
-  await FA.store.setSettings({ dataSource: e.target.value });
-  await loadAssignments();
-  await refreshAll();
-});
-
 $("refresh-btn").addEventListener("click", reloadFromPortal);
+document.querySelectorAll(".time-chip").forEach((c) => c.addEventListener("click", () => setTimeBudget(Number(c.dataset.min))));
 
-// G chip: connect / show Google status. Token lives in Chrome, not in us.
-async function renderGoogleChip() {
-  const on = await FA.google.isConnected();
-  const chip = $("google-btn");
-  chip.textContent = on ? "G ✓" : "G";
-  chip.title = on ? "Google connected (Docs + Calendar). Click to disconnect." : "Connect Google (Docs + Calendar)";
-}
-$("google-btn").addEventListener("click", async () => {
-  const chip = $("google-btn");
-  if (await FA.google.isConnected()) {
-    if (confirm("Disconnect Google from Focus Agent?")) await FA.google.disconnect();
-  } else {
-    chip.textContent = "G…";
-    try {
-      await FA.google.connect();
-    } catch (e) {
-      // Surface the real reason in the UI — the panel's console is hidden.
-      console.warn("[Focus Agent] Google connect failed:", e.message);
-      const msg = /not signed in/i.test(e.message)
-        ? "Chrome itself isn't signed in to a Google account. Click your profile icon (top-right of Chrome) → sign in with your personal Gmail, then try G again."
-        : /bad client id|invalid_client|OAuth2 not granted|manifest/i.test(e.message)
-          ? `Google rejected the client id (${e.message}). The console setting can take a few minutes to propagate — try again shortly.`
-          : `Google sign-in failed: ${e.message}`;
-      sourceNotice = "⚠️ " + msg;
-      $("forecast-headline").textContent = sourceNotice;
-      switchTab("today");
-    }
-  }
-  renderGoogleChip();
+$("work-back").addEventListener("click", () => showView("list"));
+$("work-done").addEventListener("click", () => finishWork(true));
+$("work-stop").addEventListener("click", () => finishWork(false));
+$("work-send").addEventListener("click", () => sendWork());
+$("work-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") sendWork();
 });
-renderGoogleChip();
-$("panic-btn").addEventListener("click", renderPanicPlan);
+document.querySelectorAll("#work-chips .chat-chip").forEach((chip) => chip.addEventListener("click", () => runChip(chip.dataset.cmd)));
+$("done-close").addEventListener("click", () => showView("list"));
 
-// Mood check-in wiring: dread gets a different response than fine.
+// Mood check-in: dread gets a different response than fine.
 document.querySelectorAll(".mood").forEach((btn) =>
   btn.addEventListener("click", async () => {
     const mood = btn.dataset.mood;
@@ -1223,29 +1221,40 @@ document.querySelectorAll(".mood").forEach((btn) =>
     await FA.store.updateActiveSession({ mood });
     const resp = $("mood-response");
     if (mood === "dread") {
-      resp.textContent =
-        "Dread means it feels too big — that's the dread talking, not the task. Do the tiniest first piece and nothing else. The feeling changes after you start.";
+      resp.textContent = "Dread means it feels too big — that's the dread talking, not the task. Do the first step and nothing else. The feeling changes after you start.";
       resp.classList.remove("hidden");
       setTimeout(() => resp.classList.add("hidden"), 15000);
     } else if (mood === "meh") {
-      resp.textContent = "Fair. Autopilot is fine — the timer does the caring for you.";
+      resp.textContent = "Fair. Autopilot is fine — the checklist does the caring for you.";
       resp.classList.remove("hidden");
       setTimeout(() => resp.classList.add("hidden"), 8000);
     }
   })
 );
 
-// Chat wiring
+// ▸more wiring
+$("mode-select").addEventListener("change", async (e) => {
+  await FA.store.setSettings({ mode: e.target.value });
+  settings.mode = e.target.value;
+});
+$("source-select").addEventListener("change", async (e) => {
+  await FA.store.setSettings({ dataSource: e.target.value });
+  await loadAssignments();
+  await refreshAll();
+});
+$("dev-toggle").addEventListener("change", async (e) => {
+  await FA.store.setSettings({ devMode: e.target.checked });
+  settings.devMode = e.target.checked;
+  document.body.classList.toggle("dev", e.target.checked);
+});
+$("commit-btn").addEventListener("click", addCommitment);
 $("chat-send").addEventListener("click", () => sendChat());
 $("chat-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendChat();
 });
-document.querySelectorAll(".chat-chip").forEach((chip) =>
-  chip.addEventListener("click", () => sendChat(chip.dataset.msg))
-);
+document.querySelectorAll("#view-more .chat-chip").forEach((chip) => chip.addEventListener("click", () => sendChat(chip.dataset.msg)));
 
-// ✏️ Annotate: inject the drawing overlay into the active tab. Injecting
-// again toggles it off (the annotator handles its own teardown).
+// ✏️ draw on the current page (toggles; the annotator handles its own teardown).
 $("annotate-btn").addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id || tab.url?.startsWith("chrome://")) return;
@@ -1256,19 +1265,42 @@ $("annotate-btn").addEventListener("click", async () => {
     console.warn("[Focus Agent] Can't annotate this page:", e.message);
   }
 });
-$("free-session-btn").addEventListener("click", () => startSession(null));
-$("end-session-btn").addEventListener("click", () => endSession(false));
-$("abandon-session-btn").addEventListener("click", () => endSession(true));
-$("commit-btn").addEventListener("click", addCommitment);
+
+// G chip: connect / show Google status. Token lives in Chrome, not in us.
+async function renderGoogleChip() {
+  const on = await FA.google.isConnected();
+  const chip = $("google-btn");
+  chip.textContent = on ? "G ✓ connected" : "connect G";
+  chip.title = on ? "Google connected (Docs + Calendar). Click to disconnect." : "Connect Google (Docs + Calendar)";
+}
+$("google-btn").addEventListener("click", async () => {
+  const chip = $("google-btn");
+  if (await FA.google.isConnected()) {
+    if (confirm("Disconnect Google from Focus Agent?")) await FA.google.disconnect();
+  } else {
+    chip.textContent = "G…";
+    try {
+      await FA.google.connect();
+    } catch (e) {
+      console.warn("[Focus Agent] Google connect failed:", e.message);
+      const msg = /not signed in/i.test(e.message)
+        ? "Chrome itself isn't signed in to a Google account. Click your profile icon (top-right of Chrome) → sign in, then try again."
+        : /bad client id|invalid_client|OAuth2 not granted|manifest/i.test(e.message)
+          ? `Google rejected the client id (${e.message}). Try again shortly.`
+          : `Google sign-in failed: ${e.message}`;
+      sourceNotice = "⚠️ " + msg;
+      $("forecast-headline").textContent = sourceNotice;
+    }
+  }
+  renderGoogleChip();
+});
 
 /* ------------------------------------------------------------------ *
  * Boot
  * ------------------------------------------------------------------ */
 (async () => {
-  // Pick the brain first: real Claude via the local bridge if it's running,
-  // built-in rules otherwise. The badge tells Ben which one he's got.
   const brain = await FA.initCoach();
-  $("brain-badge").textContent = brain === "claude" ? "🧠" : "⚙️";
+  $("brain-badge").textContent = brain === "claude" ? "🧠 Claude (bridge)" : "⚙️ rules";
   $("brain-badge").title =
     brain === "claude"
       ? "Real Claude brain (local bridge running)"
@@ -1277,12 +1309,24 @@ $("commit-btn").addEventListener("click", addCommitment);
   await loadAssignments();
   await refreshAll();
   await loadChat();
+  renderGoogleChip();
 
-  // The popup's Panic shortcut asks us to open on a specific tab.
-  const { panelOpenTab } = await chrome.storage.local.get("panelOpenTab");
+  // The popup asked us to Smart Start something specific.
+  const { panelStart, panelOpenTab } = await chrome.storage.local.get(["panelStart", "panelOpenTab"]);
+  if (panelStart) {
+    await chrome.storage.local.remove("panelStart");
+    const a = ranked.find((x) => x.id === panelStart);
+    if (a) return smartStart(a);
+  }
   if (panelOpenTab) {
-    switchTab(panelOpenTab);
-    if (panelOpenTab === "panic") renderPanicPlan();
     await chrome.storage.local.remove("panelOpenTab");
+    if (panelOpenTab === "more") showView("more");
+  }
+
+  // A session is already running → land in the work view.
+  const s = await FA.store.getActiveSession();
+  if (s) {
+    const a = ranked.find((x) => x.id === s.assignmentId) || assignments.find((x) => x.id === s.assignmentId);
+    await enterWork(a || { id: s.assignmentId, title: s.title, course: s.course, estMin: s.plannedMin });
   }
 })();

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Focus Agent",
-  "version": "0.6.2",
-  "description": "AI focus coach for students. Reads your school portal, knows how you actually work, and coaches you through it.",
+  "version": "0.7.0",
+  "description": "Smart Start: one tap opens what you need, parks what you don't, starts the clock, and your coach is already talking. Reads your school portal.",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
