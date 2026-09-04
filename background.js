@@ -29,8 +29,63 @@ const DISTRACTOR_PATTERNS = [
   /reddit\.com/, /netflix\.com/, /twitch\.tv/, /discord\.com/, /pinterest\.com/,
 ];
 
+/* ------------------------------------------------------------------ *
+ * Selection toolbar on granted sites
+ *
+ * Highlight → Annotate · Summarize · Ask runs on any origin the student
+ * granted (optional_host_permissions; the panel asks at Smart Start for
+ * the assignment's own links). We register it as a dynamic content script
+ * for exactly those origins, so it's there on every visit — not just the
+ * tab Smart Start opened.
+ * ------------------------------------------------------------------ */
+const TOOLBAR_SCRIPT_ID = "fa-selection-toolbar";
+
+async function syncToolbarScript() {
+  let origins = [];
+  try {
+    const all = await chrome.permissions.getAll();
+    origins = (all.origins || []).filter((o) => /^https?:\/\//.test(o));
+  } catch {
+    return;
+  }
+  try {
+    const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [TOOLBAR_SCRIPT_ID] });
+    if (!origins.length) {
+      if (existing.length) await chrome.scripting.unregisterContentScripts({ ids: [TOOLBAR_SCRIPT_ID] });
+      return;
+    }
+    const def = { id: TOOLBAR_SCRIPT_ID, matches: origins, js: ["annotate/selection-toolbar.js"], runAt: "document_idle", persistAcrossSessions: true };
+    if (existing.length) await chrome.scripting.updateContentScripts([def]);
+    else await chrome.scripting.registerContentScripts([def]);
+    console.log(`[Focus Agent] selection toolbar registered on ${origins.length} origin pattern(s)`);
+  } catch (e) {
+    console.warn("[Focus Agent] toolbar registration failed:", e.message);
+  }
+}
+chrome.permissions.onAdded.addListener(syncToolbarScript);
+chrome.permissions.onRemoved.addListener(syncToolbarScript);
+chrome.runtime.onStartup.addListener(syncToolbarScript);
+
+// The worker answers COACH_CALL for content scripts, so it needs the real
+// brain when the bridge is up. Re-check at most once a minute.
+let lastBrainCheck = 0;
+async function ensureBrain() {
+  if (FA.coachBrain === "claude" || Date.now() - lastBrainCheck < 60000) return;
+  lastBrainCheck = Date.now();
+  await FA.initCoach().catch(() => {});
+}
+ensureBrain();
+
+/** Which coach methods a content script may call, and how their args map. */
+const COACH_METHODS = {
+  summarize: (p) => [p.text, { title: p.title }],
+  annotateQuestion: (p) => [p.quote, { title: p.title, url: p.url }],
+  askPassage: (p) => [p.quote, p.question, { title: p.title, url: p.url }],
+};
+
 chrome.runtime.onInstalled.addListener((details) => {
   console.log(`[Focus Agent] v${chrome.runtime.getManifest().version} installed (${details.reason}).`);
+  syncToolbarScript();
   // (The cached assignment list is deliberately KEPT across reloads — a
   // slightly stale list beats demo data while portal tabs reconnect.)
   // Re-inject content scripts into portal tabs that are already open.
@@ -139,6 +194,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         chrome.alarms.clear(CHECKIN_ALARM);
         const record = await FA.store.endSession();
         sendResponse({ ok: true, record });
+        break;
+      }
+
+      case "COACH_CALL": {
+        // Content scripts can't reach the bridge (page-origin CORS), so the
+        // selection toolbar asks the worker to run the coach for it.
+        const map = COACH_METHODS[message.method];
+        if (!map) {
+          sendResponse({ ok: false, error: `not allowed: ${message.method}` });
+          break;
+        }
+        await ensureBrain();
+        try {
+          const result = await Promise.resolve(FA.coach[message.method](...map(message.payload || {})));
+          sendResponse({ ok: true, result });
+        } catch (e) {
+          sendResponse({ ok: false, error: e.message });
+        }
+        break;
+      }
+
+      case "THREAD_APPEND": {
+        // A highlight note / summary / answer from a page lands in the chat
+        // of the assignment being worked, if a session is running.
+        const s = await FA.store.getActiveSession();
+        if (!s || !s.assignmentId || s.assignmentId === "free") {
+          sendResponse({ ok: false, reason: "no session" });
+          break;
+        }
+        const meta = await FA.store.getMeta();
+        const thread = Array.isArray(meta[s.assignmentId]?.thread) ? meta[s.assignmentId].thread : [];
+        thread.push({ role: "coach", text: String(message.text || "").slice(0, 3000), kind: message.kind || "page", at: Date.now() });
+        await FA.store.patchAssignmentMeta(s.assignmentId, { thread: thread.slice(-40) });
+        sendResponse({ ok: true });
         break;
       }
 

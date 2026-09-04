@@ -366,7 +366,7 @@ async function executeSetupPlan(assignment, plan, resources) {
   for (const o of plan.opens || []) {
     const target = o.kind === "link" ? resources.links[o.i] : resources.topics[o.i];
     if (!target?.url) continue;
-    await chrome.tabs.create({ url: target.url, active: false });
+    await openTab(target.url, false);
     opened.push({ label: (o.kind === "topic" ? "📖 " : "🔗 ") + (target.name || target.text || target.url), why: o.why });
   }
   if (plan.doc && resources.googleConnected) {
@@ -398,7 +398,46 @@ function setupMessage(plan, opened) {
   return lines.join("\n");
 }
 
+/** Open a URL in a tab; PDFs go through our pdf.js viewer so highlighting works. */
+async function openTab(url, active) {
+  let target = url;
+  try {
+    const u = new URL(url);
+    if (/\.pdf($|[?#])/i.test(u.pathname + u.search) && !u.href.startsWith(chrome.runtime.getURL(""))) {
+      target = chrome.runtime.getURL("viewer/pdfjs/web/viewer.html") + "?file=" + encodeURIComponent(url);
+    }
+  } catch {
+    /* not a URL we can parse — open as-is */
+  }
+  return chrome.tabs.create({ url: target, active });
+}
+
+/**
+ * Ask for host permission on the sites this assignment needs, so the
+ * highlight toolbar (and the PDF viewer's fetch) work there. Must run
+ * synchronously inside the click — Chrome only grants inside a user gesture.
+ */
+function requestOriginsFor(assignment) {
+  const origins = new Set();
+  const add = (u) => {
+    try {
+      const o = new URL(u);
+      if (/^https?:$/.test(o.protocol)) origins.add(`${o.origin}/*`);
+    } catch {
+      /* skip */
+    }
+  };
+  add(assignment.url);
+  for (const l of assignment.links || []) add(l.url);
+  for (const t of snapshot?.topics?.[assignment.sectionId] || []) add(t.url);
+  if (!origins.size || !chrome.permissions?.request) return Promise.resolve(false);
+  return chrome.permissions.request({ origins: [...origins] }).catch(() => false);
+}
+
 async function smartStart(assignment, minOverride) {
+  // 0. Permission for this assignment's sites (inside the click gesture).
+  const permission = requestOriginsFor(assignment);
+
   // 1. Park distracting tabs into a separate minimized window (reversible).
   try {
     const allTabs = await chrome.tabs.query({ currentWindow: true });
@@ -436,7 +475,8 @@ async function smartStart(assignment, minOverride) {
   const meta = await FA.store.getMeta();
   const plan = meta?.[assignment.id]?.setupPlan || new FA.MockCoach().setup(assignment, resources);
 
-  if (assignment.url) await chrome.tabs.create({ url: assignment.url, active: true });
+  await permission; // resolved or denied — either way we go on
+  if (assignment.url) await openTab(assignment.url, true);
   let opened = [];
   try {
     opened = await executeSetupPlan(assignment, plan, resources);
@@ -1293,6 +1333,18 @@ $("google-btn").addEventListener("click", async () => {
     }
   }
   renderGoogleChip();
+});
+
+// The selection toolbar (on pages) appends to the assignment's thread via
+// the worker; pick that up live instead of waiting for a re-open.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes.assignmentMeta || !current) return;
+  const m = changes.assignmentMeta.newValue?.[current.assignment.id];
+  const thread = Array.isArray(m?.thread) ? m.thread : null;
+  if (thread && thread.length !== current.thread.length) {
+    current.thread = thread;
+    renderThread();
+  }
 });
 
 /* ------------------------------------------------------------------ *

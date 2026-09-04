@@ -129,6 +129,41 @@ def build_split_step(p):
     ), ["steps"]
 
 
+def build_summarize(p):
+    return (
+        f"{COACH_IDENTITY}\n\n"
+        f"The student highlighted this passage from {p.get('title') or 'a reading'!r}:\n---\n"
+        f"{str(p.get('text', ''))[:12000]}\n---\n\n"
+        "Summarize ONLY this passage for a 9th grader: 2-5 short bullet points, "
+        "each a complete plain-English sentence, no filler, no intro line. Keep "
+        "names, dates and numbers exact. Reply JSON: {\"summary\": \"<bullets "
+        "separated by newlines, each starting with '• '>\"}"
+    ), ["summary"]
+
+
+def build_annotate_question(p):
+    return (
+        f"{COACH_IDENTITY}\n\n"
+        f"The student is annotating {p.get('title') or 'a reading'!r} and highlighted:\n---\n"
+        f"{str(p.get('quote', ''))[:1500]}\n---\n\n"
+        "Write the ONE question a sharp teacher would pencil in the margin next to "
+        "this exact passage -- the question whose answer IS a good annotation. "
+        "Specific to these words (name the thing in the passage), never generic, "
+        "never answered. Under 18 words. Reply JSON: {\"question\": \"<question>\"}"
+    ), ["question"]
+
+
+def build_ask_passage(p):
+    return (
+        f"{COACH_IDENTITY}\n{_policy(p)}\n\n"
+        f"From {p.get('title') or 'a reading'!r}, the student highlighted:\n---\n"
+        f"{str(p.get('quote', ''))[:4000]}\n---\n"
+        f"Their question about it: {str(p.get('question', ''))[:500]}\n\n"
+        "Answer about THIS passage. Use as many words as the answer needs and no "
+        "more. Plain text, simple markdown allowed. Reply JSON: {\"reply\": \"<answer>\"}"
+    ), ["reply"]
+
+
 def build_autopsy(p):
     return (
         f"{COACH_IDENTITY}\n\n"
@@ -311,6 +346,9 @@ BUILDERS = {
     "breakdown": build_breakdown,
     "breakdownSteps": build_breakdown_steps,
     "splitStep": build_split_step,
+    "summarize": build_summarize,
+    "annotateQuestion": build_annotate_question,
+    "askPassage": build_ask_passage,
     "autopsy": build_autopsy,
     "chat": build_chat,
     "explain": build_explain,

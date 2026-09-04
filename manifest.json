@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Focus Agent",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Smart Start: one tap opens what you need, parks what you don't, starts the clock, and your coach is already talking. Reads your school portal.",
   "icons": {
     "16": "icons/icon16.png",
@@ -75,5 +75,9 @@
       "https://www.googleapis.com/auth/documents",
       "https://www.googleapis.com/auth/calendar.events"
     ]
-  }
+  },
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ]
 }

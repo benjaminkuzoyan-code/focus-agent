@@ -55,6 +55,8 @@ The side panel is **one screen in three states**. Everything else lives behind �
 | **done** | Minutes this sitting vs your guess, one debrief line, and the next pick with its own ▶. | ✅ |
 | **▸more** | Classes + grades + this week + phone alerts (iCal), stats + autopsy, XP level, commitments, general chat, settings (Google, tutor/answer, data source, ✏️ draw, developer mode). | ✅ |
 
+**Highlight anything → three bubbles** (v0.7.1): on any site Smart Start opened (permission asked once per site) and on PDFs (opened in our bundled pdf.js viewer), select text and get **🖍 annotate** (text-anchored highlight; the coach pencils a *question* in the margin, you write the note), **≡ summarize** (Chrome's on-device Summarizer first — free, private — then the coach brain), **? ask** (the coach, scoped to that passage). Notes, summaries and answers land in the assignment's chat thread while a session runs. Highlights survive reload and reflow. Nothing fires on hover.
+
 Still running underneath: tab parking (distractors move to a minimized window — nothing closed), distraction negotiation with receipts, check-in notifications, Focus Forecast, avoidance detection, streaks.
 
 **Developer mode** (▸more → settings) is Ben's build: extra chips (`write this step`, `answer these`) that ask the coach to do the work. Off by default; never on in the student build.

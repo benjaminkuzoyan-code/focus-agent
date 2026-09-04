@@ -29,7 +29,9 @@ const chrome = {
       async set(obj) { Object.assign(store, obj); },
       async remove(k) { (Array.isArray(k) ? k : [k]).forEach((x) => delete store[x]); },
     },
+    onChanged: { addListener() {} },
   },
+  permissions: { async request() { return true; }, async getAll() { return { origins: [] }; } },
   tabs: {
     async query() { return []; },
     async create(o) { created.push(o.url); return { id: 1, url: o.url }; },
@@ -40,7 +42,7 @@ const chrome = {
     onActivated: { addListener() {} },
   },
   windows: { async create() { return { id: 2 }; }, async getCurrent() { return { id: 1 }; } },
-  runtime: { async sendMessage() { return {}; }, getManifest: () => ({ version: "test" }) },
+  runtime: { async sendMessage() { return {}; }, getManifest: () => ({ version: "test" }), getURL: (p) => "chrome-extension://test/" + p },
   scripting: { async insertCSS() {}, async executeScript() {} },
   identity: { getAuthToken: (o, cb) => cb && cb(undefined) },
   alarms: { create() {}, clear() {} },
@@ -85,6 +87,11 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
 
   const cards = window.document.querySelectorAll("#today-list .card");
   check("list renders mock assignments", cards.length > 0, `${cards.length} cards`);
+  if (!cards.length) {
+    console.log(results.join("\n"));
+    console.log("\nERRORS:\n" + (errors.join("\n\n") || "(none captured — check script load order)"));
+    process.exit(1);
+  }
   check("one primary button per card", [...cards].every((c) => c.querySelectorAll(".start").length === 1));
   check("boots into list view", visible("list"));
   check("no boss battle markup", !html.includes("boss-list"));
