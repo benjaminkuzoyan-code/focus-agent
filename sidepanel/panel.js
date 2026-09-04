@@ -1222,15 +1222,39 @@ async function sendWork(text) {
  * it and replace the block with what happened. Never in the student build.
  */
 async function applyDocOpsFromReply(reply, target, googleConnected) {
-  const m = String(reply || "").match(/```docops\s*([\s\S]*?)```/);
-  if (!m) return reply;
-  const rest = reply.replace(m[0], "").trim();
+  // Tolerant: the closing fence may be missing (models drop it, proxies strip
+  // it), so take everything from the opening fence to the matching JSON brace.
+  const text = String(reply || "");
+  const open = text.search(/```docops\b/);
+  if (open < 0) return reply;
+  const start = text.indexOf("{", open);
+  if (start < 0) return text.slice(0, open).trim() || reply;
+  let depth = 0;
+  let end = -1;
+  let inStr = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) {
+      end = i + 1;
+      break;
+    }
+  }
+  const after = end > 0 ? text.slice(end).replace(/^\s*```/, "") : "";
+  const rest = (text.slice(0, open) + (end > 0 ? after : "")).trim();
   if (!settings.devMode) return rest || reply;
+  if (end < 0) return `${rest}\n\n(the coach's doc edit was cut off before the JSON closed — ask it to send a shorter one)`;
   let block;
   try {
-    block = JSON.parse(m[1]);
-  } catch {
-    return `${rest}\n\n(the coach tried to edit the doc but sent malformed ops)`;
+    block = JSON.parse(text.slice(start, end));
+  } catch (e) {
+    return `${rest}\n\n(the coach tried to edit the doc but sent malformed ops: ${e.message})`;
   }
   if (!target?.id) return `${rest}\n\n(the coach wanted to write into your doc, but this assignment has no doc yet — open one in a tab and tap + this tab)`;
   if (!googleConnected) return `${rest}\n\n(the coach wanted to write into your doc — connect Google first: ⚙ → connect G)`;

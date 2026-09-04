@@ -558,8 +558,14 @@ def ask_claude_text(prompt: str) -> str:
     )
     if proc.returncode != 0:
         raise RuntimeError(f"claude -p failed: {proc.stderr[:200]}")
-    text = json.loads(proc.stdout).get("result", "")
-    return re.sub(r"^```(?:markdown|md)?\s*|\s*```$", "", text.strip())
+    text = json.loads(proc.stdout).get("result", "").strip()
+    # Only unwrap a reply that is ENTIRELY one fenced block. Stripping a trailing
+    # fence unconditionally used to eat the closing ``` of a docops block at the
+    # end of a reply, so the panel never saw it as a block.
+    if text.startswith("```") and text.count("```") == 2 and text.endswith("```"):
+        text = re.sub(r"^```(?:markdown|md)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return text
 
 
 def ask_claude(prompt: str):

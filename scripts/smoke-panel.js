@@ -238,6 +238,8 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   // docops in a reply: student build strips the block and never writes
   const out = await window.eval("applyDocOpsFromReply('Done.\\n```docops\\n{\"ops\":[{\"type\":\"append\",\"text\":\"x\"}],\"summary\":\"added x\"}\\n```', {id:null}, false)");
   check("student build: docops block stripped, nothing written", out.trim() === "Done." || /no doc/.test(out));
+  const out2 = await window.eval("applyDocOpsFromReply('Writing it now.\\n```docops\\n{\"ops\":[{\"type\":\"append\",\"text\":\"x }\"}],\"summary\":\"s\"}', {id:null}, false)");
+  check("docops parsed even without a closing fence (brace-matched, string-safe)", out2.trim() === "Writing it now." || /no doc/.test(out2), out2.slice(0, 60));
   $("work-stop").click();
   await sleep(300);
   $("done-close").click();
