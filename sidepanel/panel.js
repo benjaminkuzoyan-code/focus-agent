@@ -2047,6 +2047,7 @@ async function sendChat(text) {
     ranked,
     brain: snapshot ? FA.snapshotForBrain(snapshot, { maxAssignments: 0 }) : null,
     mode: settings.mode || "tutor",
+    devMode: Boolean(settings.devMode),
     doc,
     docNote: note,
     stats: {

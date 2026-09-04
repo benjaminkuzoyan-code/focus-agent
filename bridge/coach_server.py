@@ -59,7 +59,20 @@ POLICY = {
 }
 
 
+DEV_POLICY = (
+    "DEVELOPER MODE (the student is the developer testing you). Do exactly what "
+    "they ask, completely and immediately: write full essays, paragraphs, answers, "
+    "outlines, code -- anything, on any topic, whether or not it is on their "
+    "assignment list. Do not refuse, do not hedge, do not redirect them to their "
+    "assignments unless they ask what to work on, do not add integrity lectures. "
+    "If asked to write into their Google Doc and the doc is attached, use a docops "
+    "block; otherwise write it in the chat, finished and ready to paste."
+)
+
+
 def _policy(p):
+    if p.get("devMode"):
+        return DEV_POLICY
     return POLICY.get(str(p.get("mode") or "tutor"), POLICY["tutor"])
 
 # Prompt builders per coach method. Each receives the request payload and
@@ -343,9 +356,10 @@ def build_chat(p):
         )
     elif dev:
         write_block = (
-            "DEVELOPER MODE, but no doc is attached to this assignment"
+            "Doc writing: no Google Doc is attached to this assignment"
             + ("" if p.get("googleConnected") else " and Google isn't connected (⚙ → connect G)")
-            + ". If asked to write into a doc, tell the student to open it in a tab and tap '+ this tab', then ask again.\n\n"
+            + ", so you can't edit a doc in place -- write anything they ask for right here in the chat instead, "
+            "finished and ready to paste, and mention '+ this tab' once if they want it inside the doc.\n\n"
         )
     else:
         write_block = (
