@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Focus Agent — How It Works</title>
+<style>
+  :root {
+    --bg: #f7f7fb; --panel: #ffffff; --ink: #1c1d26; --muted: #5e6172;
+    --line: #e3e4ec; --accent: #6d5cff; --accent-soft: #ecebff;
+    --code-bg: #f0f0f6; --warn-bg: #fff6e0; --warn-line: #f2c96b;
+    --ok-bg: #e8f8ef; --ok-line: #6cc59a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101118; --panel: #181a24; --ink: #ecedf5; --muted: #a3a6b8;
+      --line: #2a2c3a; --accent: #9d90ff; --accent-soft: #24223d;
+      --code-bg: #1f2130; --warn-bg: #2d2610; --warn-line: #a8862e;
+      --ok-bg: #12291d; --ok-line: #3d8f62;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 -apple-system, "SF Pro Text", Segoe UI, Roboto, sans-serif; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 40px 24px 80px; }
+  header { margin-bottom: 40px; }
+  h1 { font-size: 2.2rem; margin: 0 0 8px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); font-size: 1.05rem; }
+  h2 { font-size: 1.5rem; margin: 48px 0 12px; padding-top: 24px; border-top: 1px solid var(--line); letter-spacing: -0.01em; }
+  h3 { font-size: 1.1rem; margin: 28px 0 8px; }
+  p { margin: 0 0 14px; }
+  code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code-bg);
+    padding: 2px 6px; border-radius: 5px; }
+  pre { background: var(--code-bg); padding: 14px 16px; border-radius: 10px; overflow-x: auto;
+    font: 0.85rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre code { background: none; padding: 0; }
+  nav { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; }
+  nav ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 32px; }
+  nav li { break-inside: avoid; margin: 3px 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 0.95rem; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .table-wrap { overflow-x: auto; }
+  .callout { border-radius: 10px; padding: 12px 16px; margin: 16px 0; border: 1px solid; }
+  .warn { background: var(--warn-bg); border-color: var(--warn-line); }
+  .ok { background: var(--ok-bg); border-color: var(--ok-line); }
+  .tip { background: var(--accent-soft); border-color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 16px 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .card h4 { margin: 0 0 6px; font-size: 1rem; }
+  .card p { margin: 0; color: var(--muted); font-size: 0.93rem; }
+  figure { margin: 20px 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow-x: auto; }
+  figcaption { color: var(--muted); font-size: 0.88rem; margin-top: 8px; text-align: center; }
+  svg text { font-family: -apple-system, Segoe UI, sans-serif; fill: var(--ink); }
+  svg .box { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; }
+  svg .box2 { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+  svg .arrow { stroke: var(--muted); stroke-width: 1.5; fill: none; marker-end: url(#arr); }
+  svg .lbl { font-size: 11px; fill: var(--muted); }
+  svg .t { font-size: 13px; font-weight: 600; }
+  svg .s { font-size: 11px; fill: var(--muted); }
+  ul, ol { padding-left: 24px; }
+  li { margin: 4px 0; }
+  .kbd { font: 0.85em ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 5px; padding: 1px 6px; background: var(--panel); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Focus Agent — How It Works</h1>
+  <div class="sub">A tour of the Chrome extension in <code>~/Projects/focus-agent</code>, file by file and message by message. Written 2026-08-27, matches v0.5.2.</div>
+</header>
+
+<nav>
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#big-picture">The big picture</a></li>
+    <li><a href="#pieces">The five pieces of a Chrome extension</a></li>
+    <li><a href="#data-flow">How assignments get from Blackbaud to you</a></li>
+    <li><a href="#adapters">Adapters &amp; the Assignment shape</a></li>
+    <li><a href="#brains">The two brains (rules vs. Claude)</a></li>
+    <li><a href="#bridge">The bridge server</a></li>
+    <li><a href="#features">Feature by feature</a></li>
+    <li><a href="#storage">What's stored, and where</a></li>
+    <li><a href="#background">The background worker</a></li>
+    <li><a href="#loading">Loading, reloading, and packaging</a></li>
+    <li><a href="#debugging">Debugging cheat sheet</a></li>
+    <li><a href="#glossary">JavaScript concepts you'll meet</a></li>
+  </ol>
+</nav>
+
+<div class="callout tip"><strong>v0.6 pivot (2026-08-29):</strong> the extension now reads the <em>whole</em> portal — classes, grades, schedule, topics, and full assignment instructions — into one <strong>Student Snapshot</strong> (<code>lib/snapshot.js</code>), and two new brain calls use it: <strong>💡 Explain</strong> (assignment in plain language) and <strong>🔍 Pre-check</strong> (tutor feedback on a draft, never a rewrite). The 🎓 Classes tab shows grades and this week's schedule and sets up phone notifications via the portal's iCal feed. Design and roadmap: <code>docs/PIVOT.md</code>. Everything below still applies; the data-flow section now has a second, bigger consumer of the same cookie-authenticated calls.</div>
+
+<h2 id="big-picture">1. The big picture</h2>
+<p>Focus Agent is a Chrome extension that reads your school portal's assignment list, ranks what you should do first, and coaches you through actually doing it — timers, check-ins, nudges when you drift to YouTube, and a chat coach that knows your real workload.</p>
+<p>Three design rules shape everything:</p>
+<div class="grid">
+  <div class="card"><h4>Everything stays on your device</h4><p>Assignments, sessions, and stats live in <code>chrome.storage.local</code>. Nothing is uploaded anywhere. That's the privacy story for parents and schools.</p></div>
+  <div class="card"><h4>Works with or without AI</h4><p>A rule-based coach always works. If the local bridge server is running, a real Claude brain takes over — same interface, zero UI changes.</p></div>
+  <div class="card"><h4>Negotiate, don't block</h4><p>It never blocks sites. It notices drift and talks to you about it, with receipts ("you said 4pm").</p></div>
+</div>
+
+<h2 id="pieces">2. The five pieces of a Chrome extension</h2>
+<p>Chrome extensions aren't one program — they're several small programs running in different places that talk by passing messages. <code>manifest.json</code> is the map that tells Chrome what's what.</p>
+
+<div class="table-wrap"><table>
+  <tr><th>Piece</th><th>Files</th><th>Runs where</th><th>Can do</th></tr>
+  <tr><td><strong>Content scripts</strong></td><td><code>content.js</code>, <code>overlay/coach-overlay.js</code>, plus the <code>adapters/</code> and <code>lib/</code> files listed in the manifest</td><td>Injected into the portal page itself (Blackbaud, Canvas, …)</td><td>Read the page, call the portal's API with your login cookies, draw on top of the page. Limited Chrome APIs (storage + messaging).</td></tr>
+  <tr><td><strong>Service worker</strong></td><td><code>background.js</code></td><td>Invisible background process. Chrome <em>kills it when idle</em> and wakes it on events.</td><td>Alarms, notifications, watching tabs, full Chrome API.</td></tr>
+  <tr><td><strong>Side panel</strong></td><td><code>sidepanel/panel.html/.js/.css</code></td><td>The tall panel docked to the right of the browser</td><td>Full UI. Queries tabs, messages content scripts, reads storage.</td></tr>
+  <tr><td><strong>Popup</strong></td><td><code>popup/</code></td><td>The little window when you click the toolbar icon</td><td>One-glance "what's next" + a Panic shortcut that opens the panel.</td></tr>
+  <tr><td><strong>Manifest</strong></td><td><code>manifest.json</code></td><td>—</td><td>Declares permissions, which URLs get content scripts, and in what order files load.</td></tr>
+</table></div>
+
+<h3>Why load order matters</h3>
+<p>Content scripts aren't modules — every file is just dumped into the same scope one after another. So the manifest lists <code>adapters/schema.js</code> first (it creates the global <code>FA</code> object), then the adapters, then <code>lib/priority.js</code> and <code>lib/ai.js</code>, then <code>content.js</code>, and finally the overlay. Every file starts with the same trick:</p>
+<pre><code>(() =&gt; {
+  const FA = (globalThis.FA = globalThis.FA || {});   // grab or create the shared namespace
+  FA.something = ...;                                  // hang your stuff on it
+})();</code></pre>
+<p>That's an <em>IIFE</em> (immediately-invoked function expression): a function you define and call in one go, so its local variables don't leak into the page. <code>FA</code> is the one deliberate global. The service worker does the same thing with <code>importScripts(...)</code>.</p>
+
+<h2 id="data-flow">3. How assignments get from Blackbaud to you</h2>
+<figure>
+<svg viewBox="0 0 860 330" width="860" height="330" role="img" aria-label="Data flow diagram">
+  <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a8ca0"/></marker></defs>
+  <!-- Blackbaud API -->
+  <rect class="box2" x="20" y="120" width="170" height="70" rx="10"/>
+  <text class="t" x="105" y="150" text-anchor="middle">Blackbaud API</text>
+  <text class="s" x="105" y="170" text-anchor="middle">/api/DataDirect/…</text>
+  <!-- content script -->
+  <rect class="box" x="250" y="120" width="190" height="70" rx="10"/>
+  <text class="t" x="345" y="145" text-anchor="middle">Content script</text>
+  <text class="s" x="345" y="163" text-anchor="middle">adapters/blackbaud.js</text>
+  <text class="s" x="345" y="178" text-anchor="middle">→ FA.makeAssignment()</text>
+  <!-- overlay -->
+  <rect class="box" x="500" y="20" width="190" height="60" rx="10"/>
+  <text class="t" x="595" y="45" text-anchor="middle">Page overlay</text>
+  <text class="s" x="595" y="63" text-anchor="middle">bubble + badges on rows</text>
+  <!-- side panel -->
+  <rect class="box" x="500" y="120" width="190" height="70" rx="10"/>
+  <text class="t" x="595" y="145" text-anchor="middle">Side panel</text>
+  <text class="s" x="595" y="163" text-anchor="middle">Today · Panic · Timer</text>
+  <text class="s" x="595" y="178" text-anchor="middle">Chat · Stats · Quests</text>
+  <!-- background -->
+  <rect class="box" x="500" y="230" width="190" height="60" rx="10"/>
+  <text class="t" x="595" y="255" text-anchor="middle">Service worker</text>
+  <text class="s" x="595" y="273" text-anchor="middle">caches list, alarms, nudges</text>
+  <!-- storage -->
+  <rect class="box2" x="740" y="120" width="100" height="70" rx="10"/>
+  <text class="t" x="790" y="150" text-anchor="middle">storage</text>
+  <text class="s" x="790" y="168" text-anchor="middle">.local</text>
+  <!-- arrows -->
+  <path class="arrow" d="M190,155 L250,155"/>
+  <text class="lbl" x="220" y="145" text-anchor="middle">fetch (cookies)</text>
+  <path class="arrow" d="M440,140 L500,55"/>
+  <text class="lbl" x="455" y="90" text-anchor="middle">same world</text>
+  <path class="arrow" d="M500,155 L440,155"/>
+  <text class="lbl" x="470" y="200" text-anchor="middle">GET_ASSIGNMENTS</text>
+  <path class="arrow" d="M440,175 L500,250"/>
+  <text class="lbl" x="490" y="220" text-anchor="end">CACHE_ASSIGNMENTS</text>
+  <path class="arrow" d="M690,155 L740,155"/>
+  <path class="arrow" d="M690,260 Q720,260 760,190"/>
+</svg>
+<figcaption>Every consumer eventually gets the same normalized Assignment objects; only the delivery route differs.</figcaption>
+</figure>
+
+<p>Step by step, when you open the Assignment Center:</p>
+<ol>
+  <li><strong>Chrome injects the content scripts</strong> because the URL matches <code>https://*.myschoolapp.com/*</code> in the manifest. <code>content.js</code> logs <code>[Focus Agent] v0.5.2 content script loaded</code>.</li>
+  <li><strong><code>detectAdapter()</code></strong> in <code>content.js</code> asks each adapter <code>matches(hostname)</code>. The Blackbaud one says yes for <code>myschoolapp.com</code>.</li>
+  <li><strong>The adapter calls the portal's own API</strong> — <code>/api/DataDirect/AssignmentCenterAssignments/?format=json&amp;filter=2&amp;persona=2&amp;dateStart=…&amp;dateEnd=…</code>. Because the request is made <em>from the portal page</em>, it carries your login cookies automatically. No password ever touches the extension.</li>
+  <li><strong>Normalize.</strong> Each raw item (snake_case keys like <code>short_description</code>, <code>groupname</code>, <code>date_due</code>) is turned into the standard Assignment shape by <code>FA.makeAssignment()</code>. Finished ones (<code>assignment_status ≥ 1</code>) are dropped.</li>
+  <li><strong>Cache.</strong> <code>content.js</code> fires a <code>CACHE_ASSIGNMENTS</code> message to the background worker, which saves the list to storage so the popup and side panel still work after you close the portal tab.</li>
+  <li><strong>The overlay</strong> (same page, same scope) calls <code>fetchNormalized()</code> directly, ranks the list, picks one, draws the bubble and pins badges on the matching portal rows.</li>
+  <li><strong>The side panel</strong>, when set to "portal", runs <code>chrome.tabs.query()</code> to find portal tabs and sends each one <code>GET_ASSIGNMENTS</code>; the content script answers with the fresh list. If no tab answers it falls back to the cache, then to demo data — and (as of today) tells you exactly why in the headline.</li>
+</ol>
+
+<div class="callout warn"><strong>The gotcha that bit us today:</strong> Chrome only reads your files when the extension is (re)loaded. Editing <code>adapters/blackbaud.js</code> does nothing until you hit ↻ at <code>chrome://extensions</code> <em>and</em> refresh the portal tab — an already-open tab keeps its old content script (and can't answer the side panel's messages: "Receiving end does not exist").</div>
+
+<h2 id="adapters">4. Adapters &amp; the Assignment shape</h2>
+<p>An <em>adapter</em> is a small object that knows one portal. Every adapter exposes the same two functions, so nothing downstream cares which school you go to:</p>
+<pre><code>FA.adapters.blackbaud = {
+  matches(host) { return /myschoolapp\.com$|blackbaud\.com$/.test(host); },
+  async fetchAssignments() { /* call API, return Assignment[] */ },
+};</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>Adapter</th><th>Portal</th><th>Status</th></tr>
+  <tr><td><code>blackbaud.js</code></td><td>myschoolapp.com / blackbaud.com — Poly's</td><td>Verified live on 2026-08-27 with real fall assignments</td></tr>
+  <tr><td><code>canvas.js</code></td><td>instructure.com</td><td>Written, untested (needs a friend's account)</td></tr>
+  <tr><td><code>classroom.js</code></td><td>classroom.google.com</td><td>Written, untested</td></tr>
+  <tr><td><code>mock.js</code></td><td>— (never matches a host)</td><td>Fake data for the "demo" data source</td></tr>
+  <tr><td><code>demo.js</code></td><td>localhost:8000/demo-portal</td><td>Dev-only; stripped from the store build</td></tr>
+</table></div>
+
+<h3>The one shape everything uses</h3>
+<pre><code>{
+  id:      "blackbaud-41491503",   // portal's own id when available, else a content hash
+  title:   "PEChem HW #1",
+  course:  "PolyEnriched Chemistry - 3",
+  type:    "homework",              // test | project | essay | lab | homework | reading | other
+  dueDate: "2026-08-28T15:30:00.000Z",   // ISO, or "" if unknown
+  points:  0,                       // Blackbaud's list endpoint doesn't include points
+  url:     "https://polytechnic.myschoolapp.com/lms-assignment/assignment/assignment-student-view/41491503",
+  source:  "blackbaud",
+  raw:     { ...the original API object, kept for debugging }
+}</code></pre>
+<p><code>FA.normalizeType()</code> in <code>schema.js</code> buckets whatever free text the portal uses ("Process", "Reading", "HW", null…) into those seven canonical types by regex. Type drives effort estimates and whether something counts as a "boss."</p>
+
+<h2 id="brains">5. The two brains</h2>
+<p>All coaching goes through one object: <code>FA.coach</code>. It has methods like <code>pick(ranked)</code>, <code>panicPlan(ranked, minutes)</code>, <code>breakdown(assignment)</code>, <code>chat(messages, context)</code>, <code>debrief(session)</code>, <code>autopsy(sessions)</code>. There are two classes that implement them:</p>
+<div class="grid">
+  <div class="card"><h4>⚙️ MockCoach (rules)</h4><p>Pure JavaScript, instant, always available. Picks the top-ranked item and writes a reason from a few templates ("Due in 16h and takes about 30m. The math says now."). Panic plan is a greedy value-per-minute schedule.</p></div>
+  <div class="card"><h4>🧠 ClaudeCoach (real brain)</h4><p><em>Extends</em> MockCoach. Each method tries <code>bridgeCall()</code> to the local server first; if that fails or times out, it calls <code>super.method()</code> and you get the rules answer. Failure is invisible.</p></div>
+</div>
+<p><code>FA.initCoach()</code> runs at startup: it pings <code>http://localhost:8000/health</code>. Answer → <code>FA.coach = new ClaudeCoach()</code> and the badge shows 🧠. No answer → rules, badge shows ⚙️. That's the "real brain is offline" message.</p>
+<p>The UI never waits on Claude. <code>renderToday()</code> shows the rules pick immediately, then if the brain is Claude it fires the slow call and upgrades the text in place when it lands (that's the 🧠 prefix).</p>
+
+<h3>How ranking works (<code>lib/priority.js</code>)</h3>
+<ul>
+  <li><code>estimateMinutes(a, sessions)</code> — average of your past sessions on the same <em>type</em> of work; falls back to a base table (test 60, essay 50, homework 30…). So the estimates become <em>yours</em> over time.</li>
+  <li><code>urgencyScore(a)</code> — time pressure from hours until due, plus points, plus a bit of effort. Overdue explodes the score.</li>
+  <li><code>rankAssignments()</code> — filters out anything you've marked done, decorates with <code>estMin</code>/<code>urgency</code>, sorts descending.</li>
+  <li><code>findAvoided()</code> — the "friend noticing" feature: things visible for 3+ days, due within 5, never started (or overdue and never started).</li>
+</ul>
+
+<h2 id="bridge">6. The bridge server (<code>bridge/coach_server.py</code>)</h2>
+<p>A tiny Python HTTP server on <code>127.0.0.1:8000</code> with two jobs: serve the project folder statically (so the demo portal works) and answer <code>POST /coach</code>.</p>
+<pre><code>cd ~/Projects/focus-agent
+python3 bridge/coach_server.py     # leave this terminal open</code></pre>
+<p>For each <code>/coach</code> request it builds a prompt (one builder per method: <code>build_pick</code>, <code>build_panic</code>, <code>build_chat</code>…), then literally runs</p>
+<pre><code>claude -p --model sonnet --output-format json</code></pre>
+<p>as a subprocess. That's headless Claude Code — it uses <em>your existing Claude login</em>, so no API key. Each call spins up a fresh session (~5–20 s) and spends a bit of your plan quota. The extension can reach it because the manifest lists <code>http://localhost:8000/*</code> in <code>host_permissions</code>.</p>
+<div class="callout tip">Because it shells out to <code>claude</code>, the bridge needs the network. Flaky wifi = timeouts = silent fallback to rules. If 🧠 never appears, check wifi before anything else.</div>
+<p>The store build strips the bridge and the localhost permission entirely (see <a href="#loading">packaging</a>) — store users get rules-only until a proper backend exists.</p>
+
+<h2 id="features">7. Feature by feature</h2>
+
+<h3>Today tab</h3>
+<ul>
+  <li><strong>Focus Forecast</strong> (<code>lib/forecast.js</code>) — next 7 days as weather. Each day's minutes-due is bucketed: ☀️ clear, 🌤️ light, ⛅ busy, 🌧️ heavy, ⛈️ STORM. Tests count extra because they need lead-up study time. Generates one headline like "Thursday is a storm — start the essay Tuesday."</li>
+  <li><strong>Coach pick</strong> — the one thing to do now, with a reason.</li>
+  <li><strong>Avoidance card</strong> — appears when <code>findAvoided()</code> flags something. Offers a 2-minute micro-start (the research says the dread changes after you start) or a breakdown.</li>
+  <li><strong>Smart Start</strong> (▶ on each card) — opens the assignment's URL, starts a focus session sized to the estimate (clamped 15–50 min), tells the background worker to schedule check-ins.</li>
+  <li><strong>Doc Starter</strong> (essays/projects) — creates a titled Google Doc, puts the coach's outline on your clipboard, and remembers the doc URL so next click reopens it.</li>
+</ul>
+
+<h3>Panic tab</h3>
+<p>"I have 120 minutes tonight." The coach builds a schedule of time blocks ordered by value-per-minute and is honest about what doesn't fit ("sacrifices"). Claude version gets the full list; rules version is greedy.</p>
+
+<h3>Timer tab</h3>
+<ul>
+  <li>Sessions with a ring timer; optional mood check-in (😃 😐 😬) whose answer changes the coach's response.</li>
+  <li><strong>Check-ins</strong> — every N minutes (default 10) a notification asks "Still on it?" Honest "got distracted" is logged as a distraction, not punished.</li>
+  <li><strong>Commitments</strong> — "start the essay at 4:00." The background worker polls every minute and fires a "Receipts 🧾" notification at the time you named.</li>
+  <li><strong>Debrief</strong> — one line after each session (Claude-written when available).</li>
+</ul>
+
+<h3>Chat tab</h3>
+<p>Talks to <code>FA.coach.chat()</code> with the last 12 messages plus context: your top 8 ranked assignments and this week's stats. That's why it "knows" your workload — but only whatever the panel currently has loaded. Panel on demo data → coach on demo data.</p>
+
+<h3>Stats tab</h3>
+<p>Charts (<code>lib/charts.js</code>, hand-drawn SVG): focused minutes per day, what hours you actually focus, distractions per session, which sites cost you most (each ≈ 23 min refocus, per the UC Irvine research). Plus the <strong>autopsy</strong>: after 3+ sessions, patterns like "you focus best 7–9pm, Math sessions run 40% over estimate."</p>
+
+<h3>Quests tab (<code>lib/xp.js</code>)</h3>
+<p>1 focused minute = 1 XP; completing an assignment adds its estimated minutes as bonus. Level <em>n</em> needs <em>n</em>²×50 XP. Every test on the portal becomes a <strong>boss</strong> whose HP drains as you complete lead-up work and log study sessions for that course.</p>
+
+<h3>On-page overlay + ✏️ annotate</h3>
+<p>The bubble is a shadow-DOM widget (its CSS can't leak into or be broken by the portal's CSS). Badges are found by walking the page's text nodes for each assignment title; a <code>MutationObserver</code> re-applies them when Blackbaud's single-page app re-renders. The ✏️ chip injects <code>annotate/annotator.js</code> on demand via <code>chrome.scripting</code> so you can draw on any page.</p>
+
+<h2 id="storage">8. What's stored, and where</h2>
+<p>Everything is in <code>chrome.storage.local</code>, wrapped by <code>lib/storage.js</code> (<code>FA.store.*</code>) so no other file touches raw keys.</p>
+<div class="table-wrap"><table>
+  <tr><th>Key</th><th>Holds</th></tr>
+  <tr><td><code>sessions</code></td><td>Every finished focus session: what, when, planned vs actual minutes, distractions, mood</td></tr>
+  <tr><td><code>activeSession</code></td><td>The one running now (or null) — background worker reads this to decide whether to nudge</td></tr>
+  <tr><td><code>commitments</code></td><td>"Hold me to it" promises with <code>dueAt</code>, and whether kept/missed</td></tr>
+  <tr><td><code>questEvents</code></td><td>Completed quests and the XP they earned</td></tr>
+  <tr><td><code>assignmentMeta</code></td><td>Per-assignment: done?, first seen (avoidance clock), doc URL, minutes spent</td></tr>
+  <tr><td><code>assignmentsCache</code></td><td>Last fetched list + timestamp — the offline fallback. Cleared on every extension reload.</td></tr>
+  <tr><td><code>settings</code></td><td><code>dataSource</code> ("mock" = demo, "auto" = portal), session length, check-in interval</td></tr>
+  <tr><td><code>chatHistory</code></td><td>Last 40 chat messages</td></tr>
+</table></div>
+<p>Assignment ids are the join key across all of this, which is why the id collision (all 17 items hashing to the same id) wiped out the whole list: one "done" flag applied to everything. Ids are now the portal's own (<code>blackbaud-41491503</code>).</p>
+
+<h2 id="background">9. The background worker (<code>background.js</code>)</h2>
+<p>Three jobs, all event-driven because Chrome may kill the worker any time it's idle:</p>
+<ol>
+  <li><strong>Check-ins</strong> — <code>SESSION_STARTED</code> creates a repeating alarm; each tick posts a notification with "Locked in 🔒 / Got distracted 😬" buttons.</li>
+  <li><strong>Distraction watcher</strong> — on every tab switch or URL change, if a session is active and the host matches <code>DISTRACTOR_PATTERNS</code> (youtube, tiktok, reddit…), it logs the drift and sends a negotiation notification. Rate-limited to one per 2 minutes so it isn't a nag.</li>
+  <li><strong>Commitment receipts</strong> — a 1-minute alarm checks for due commitments and fires the "you told me 4pm" notification. It marks <code>notifiedAt</code> <em>before</em> notifying so a crash can't double-fire.</li>
+</ol>
+<p>It also answers messages: <code>CACHE_ASSIGNMENTS</code>, <code>GET_COACH_STATE</code>, <code>START_SESSION_FROM_PAGE</code>, <code>END_SESSION_FROM_PAGE</code>. Every handler does <code>return true</code> from the listener — that's Chrome's way of saying "I'll call <code>sendResponse</code> later, keep the channel open."</p>
+
+<h2 id="loading">10. Loading, reloading, and packaging</h2>
+<h3>Dev loop</h3>
+<ol>
+  <li><code>chrome://extensions</code> → Developer mode → <em>Load unpacked</em> → pick <code>~/Projects/focus-agent</code>. (Already done on this Mac.)</li>
+  <li>Edit files.</li>
+  <li>Hit ↻ on the extension card. <strong>Then refresh any portal tab</strong> — old tabs keep old content scripts.</li>
+  <li>Side panel closes on reload; reopen it. Check the console for the version stamp.</li>
+</ol>
+<h3>Store build</h3>
+<pre><code>bash scripts/package-store.sh     # → dist/focus-agent-&lt;version&gt;.zip</code></pre>
+<p>Copies an explicit allowlist of folders, deletes <code>adapters/demo.js</code>, and rewrites the manifest to remove every <code>localhost</code> reference. So the shipped extension has no bridge, no dev permissions, and can't be accused of phoning home. Mock data stays in so new users can try it before connecting a portal. Bump <code>"version"</code> in <code>manifest.json</code> before each build.</p>
+
+<h2 id="debugging">11. Debugging cheat sheet</h2>
+<div class="table-wrap"><table>
+  <tr><th>Symptom</th><th>Check</th><th>Likely cause</th></tr>
+  <tr><td>Bubble says "Nothing on your plate"</td><td>Portal tab console (<span class="kbd">⌥⌘J</span>): <code>[Focus Agent] overlay: N assignments, pick = …</code></td><td>N = 0 → adapter/API issue. N &gt; 0 but pick "none" → everything filtered as done (check <code>assignmentMeta</code>).</td></tr>
+  <tr><td>Wrong version in console</td><td><code>[Focus Agent] vX.Y.Z content script loaded</code></td><td>Extension not reloaded, or tab not refreshed after reload.</td></tr>
+  <tr><td>Side panel shows demo/cached data</td><td>Headline under the weather strip now explains: how many portal tabs, and per-tab "not connected" / API error</td><td>Portal tab opened before reload (refresh it), dropdown on "demo", or no portal tab open.</td></tr>
+  <tr><td>"Real brain is offline"</td><td><code>curl localhost:8000/health</code></td><td>Bridge not running — start it. Or wifi down.</td></tr>
+  <tr><td>Panel errors</td><td>Right-click inside the panel → Inspect → Console</td><td>Side panel has its own DevTools, separate from the page's.</td></tr>
+  <tr><td>Background worker errors</td><td><code>chrome://extensions</code> → Focus Agent → "service worker" link</td><td>Opens the worker's own console.</td></tr>
+</table></div>
+<div class="callout ok">Handy: paste this in the portal tab's console to see the raw API without the extension in the way:
+<pre><code>fetch("/api/DataDirect/AssignmentCenterAssignments/?format=json&amp;filter=2&amp;persona=2&amp;dateStart=8/27/2026&amp;dateEnd=12/27/2026", {credentials:"include"}).then(r =&gt; r.json()).then(console.table)</code></pre></div>
+
+<h2 id="glossary">12. JavaScript concepts you'll meet in this codebase</h2>
+<div class="table-wrap"><table>
+  <tr><th>Concept</th><th>Where</th><th>Python-brain translation</th></tr>
+  <tr><td><code>async</code> / <code>await</code> / Promises</td><td>Everywhere — every Chrome API and fetch is async</td><td>Like <code>asyncio</code>, but the whole language runs on one event loop. <code>await</code> pauses this function, not the page.</td></tr>
+  <tr><td><code>??</code> and <code>?.</code></td><td><code>item.short_description ?? item.ShortDescription</code>, <code>res?.assignments?.length</code></td><td><code>??</code> = "if null/undefined use this" (not falsy — 0 and "" pass through). <code>?.</code> = safe access; returns undefined instead of throwing.</td></tr>
+  <tr><td>Arrow functions</td><td><code>const $ = (id) =&gt; document.getElementById(id)</code></td><td><code>lambda</code>, but multi-line and they keep the outer <code>this</code>.</td></tr>
+  <tr><td>Template literals</td><td><code>`${prefix}"${a.title}" — ${reason}`</code></td><td>f-strings. Backticks, <code>${}</code>.</td></tr>
+  <tr><td>Destructuring</td><td><code>const { days, headline } = FA.buildForecast(…)</code>, <code>({ assignment, reason })</code></td><td>Tuple/dict unpacking, but by key name for objects.</td></tr>
+  <tr><td>Spread <code>...</code></td><td><code>{ ...a, estMin, urgency }</code></td><td><code>{**a, "estMin": …}</code> — copy and extend.</td></tr>
+  <tr><td><code>class</code> / <code>extends</code> / <code>super</code></td><td><code>class ClaudeCoach extends MockCoach</code></td><td>Same as Python inheritance; <code>super.pick()</code> calls the parent's version.</td></tr>
+  <tr><td>Array methods chain</td><td><code>items.filter(…).map(…).sort(…)</code></td><td>List comprehensions, but as a pipeline. <code>sort</code> mutates and takes a compare function returning negative/zero/positive.</td></tr>
+  <tr><td>IIFE</td><td>Top of every lib file</td><td>A function called the moment it's defined, used for scoping since these aren't modules.</td></tr>
+  <tr><td><code>===</code></td><td>Everywhere</td><td>Always use triple-equals. <code>==</code> does type coercion and will hurt you.</td></tr>
+  <tr><td>Message passing</td><td><code>chrome.runtime.sendMessage</code>, <code>chrome.tabs.sendMessage</code>, <code>onMessage.addListener</code></td><td>The pieces of an extension can't call each other's functions — they post JSON messages and reply. Think tiny microservices.</td></tr>
+  <tr><td>Shadow DOM</td><td><code>overlay/coach-overlay.js</code></td><td>A sealed mini-document inside the page so CSS can't leak in or out.</td></tr>
+  <tr><td><code>MutationObserver</code></td><td>Overlay badges</td><td>A callback that fires when the page's DOM changes — needed because Blackbaud re-renders without reloading.</td></tr>
+</table></div>
+
+<p style="margin-top:48px;color:var(--muted);font-size:0.9rem">Source of truth is always the code. When this doc and the code disagree, the code wins — and update this doc.</p>
+
+</div>
+</body>
+</html>

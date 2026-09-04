@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Assignment Center — Polytechnic School (DEMO)</title>
+  <style>
+    /* Deliberately Blackbaud-ish: light, dense, institutional. */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Segoe UI", Arial, sans-serif; background: #f4f5f7; color: #333; }
+    .topbar { background: #1e5288; color: white; padding: 10px 24px; display: flex; align-items: center; gap: 14px; }
+    .topbar .school { font-size: 17px; font-weight: 600; }
+    .topbar .demo-tag { background: #ffd83b; color: #4a3300; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; }
+    .nav { background: #16406b; padding: 0 24px; display: flex; gap: 22px; }
+    .nav a { color: #cfe0f0; text-decoration: none; font-size: 13px; padding: 9px 0; border-bottom: 3px solid transparent; }
+    .nav a.active { color: white; border-bottom-color: #ffd83b; }
+    .wrap { max-width: 980px; margin: 22px auto; padding: 0 16px; }
+    h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+    .sub { color: #777; font-size: 13px; margin-bottom: 18px; }
+    table { width: 100%; background: white; border-collapse: collapse; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-radius: 6px; overflow: hidden; }
+    th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #888; background: #fafbfc; padding: 10px 14px; border-bottom: 2px solid #e8eaed; }
+    td { padding: 12px 14px; border-bottom: 1px solid #eef0f2; font-size: 13.5px; vertical-align: middle; }
+    tr:hover { background: #f8fafd; }
+    .a-title { font-weight: 600; color: #1e5288; }
+    .a-class { color: #666; }
+    .a-type { font-size: 11.5px; background: #eef2f7; color: #556; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+    .a-due { white-space: nowrap; }
+    .overdue { color: #c0392b; font-weight: 600; }
+    .footer-note { margin-top: 18px; font-size: 12px; color: #999; line-height: 1.6; }
+    code { background: #eee; padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <span class="school">Polytechnic School</span>
+    <span class="demo-tag">DEMO PORTAL — NOT REAL</span>
+  </div>
+  <div class="nav">
+    <a href="#">Dashboard</a>
+    <a href="#" class="active">Assignment Center</a>
+    <a href="#">Classes</a>
+    <a href="#">Resources</a>
+  </div>
+
+  <div class="wrap">
+    <h1>Assignment Center</h1>
+    <div class="sub">Active assignments — all classes</div>
+
+    <!-- Row titles intentionally match adapters/mock.js so Focus Agent's
+         overlay badges land on these exact rows. Dates are decorative;
+         the extension gets real relative dates from the adapter. -->
+    <table>
+      <thead>
+        <tr><th>Assignment</th><th>Class</th><th>Type</th><th>Due</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="a-title">Unit 1 test corrections</td><td class="a-class">World History</td><td><span class="a-type">Test corrections</span></td><td class="a-due overdue">Yesterday</td></tr>
+        <tr><td class="a-title">Read chapters 3-4 and annotate</td><td class="a-class">English 9</td><td><span class="a-type">Reading</span></td><td class="a-due">Tomorrow 11:59 PM</td></tr>
+        <tr><td class="a-title">Problem set 2.1-2.4 (odd problems)</td><td class="a-class">Algebra II</td><td><span class="a-type">Homework</span></td><td class="a-due">Tomorrow 11:59 PM</td></tr>
+        <tr><td class="a-title">Personal narrative essay: first draft</td><td class="a-class">English 9</td><td><span class="a-type">Essay</span></td><td class="a-due">Tomorrow 11:59 PM</td></tr>
+        <tr><td class="a-title">Lab report: density of unknown liquids</td><td class="a-class">Biology</td><td><span class="a-type">Lab</span></td><td class="a-due">In 3 days</td></tr>
+        <tr><td class="a-title">Study guide: cell structure vocab</td><td class="a-class">Biology</td><td><span class="a-type">Homework</span></td><td class="a-due">In 4 days</td></tr>
+        <tr><td class="a-title">Spanish oral presentation outline</td><td class="a-class">Spanish II</td><td><span class="a-type">Project</span></td><td class="a-due">In 5 days</td></tr>
+        <tr><td class="a-title">Practice quiz: organelles</td><td class="a-class">Biology</td><td><span class="a-type">Homework</span></td><td class="a-due">In 5 days</td></tr>
+        <tr><td class="a-title">UNIT TEST: Cell Structure &amp; Function</td><td class="a-class">Biology</td><td><span class="a-type">Test</span></td><td class="a-due">In 6 days</td></tr>
+        <tr><td class="a-title">History research project: pick topic + 3 sources</td><td class="a-class">World History</td><td><span class="a-type">Project</span></td><td class="a-due">In 8 days</td></tr>
+        <tr><td class="a-title">Read chapters 5-6</td><td class="a-class">English 9</td><td><span class="a-type">Reading</span></td><td class="a-due">In 9 days</td></tr>
+      </tbody>
+    </table>
+
+    <p class="footer-note">
+      This is Focus Agent's local test portal. Serve it with
+      <code>cd ~/Projects/focus-agent &amp;&amp; python3 -m http.server 8000</code>
+      and open <code>http://localhost:8000/demo-portal/</code>.
+      The extension treats this page like a real school portal: badges appear on
+      the rows above and the coach bubble shows up bottom-right.
+    </p>
+  </div>
+</body>
+</html>

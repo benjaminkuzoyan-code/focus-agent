@@ -1,0 +1,57 @@
+/* Mini popup — same soft-glass language as the panel. */
+body {
+  font-family: ui-rounded, -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(60% 50% at 20% 20%, rgba(99, 102, 241, 0.28), transparent 70%),
+    radial-gradient(50% 45% at 85% 75%, rgba(192, 132, 252, 0.2), transparent 70%),
+    #0b0c14;
+  color: #eef0f8;
+  width: 292px;
+  margin: 0;
+  padding: 13px;
+  font-size: 14px;
+}
+
+.header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.logo { color: #818cf8; font-size: 18px; }
+.title { font-weight: 800; flex: 1; letter-spacing: 0.3px; }
+.streak {
+  font-size: 12px; background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  padding: 3px 9px; border-radius: 999px;
+}
+
+.next-up {
+  background: linear-gradient(140deg, rgba(129, 140, 248, 0.16), rgba(255, 255, 255, 0.05));
+  border: 1px solid rgba(129, 140, 248, 0.35);
+  border-radius: 18px;
+  padding: 13px;
+  margin-bottom: 12px;
+  box-shadow: 0 6px 24px rgba(99, 102, 241, 0.14);
+}
+.label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+  background: linear-gradient(135deg, #818cf8, #c084fc);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  font-weight: 800; margin-bottom: 6px;
+}
+.next-title { font-weight: 700; margin-bottom: 4px; }
+.next-meta { font-size: 12px; color: #9aa0b4; line-height: 1.45; }
+
+.actions { display: flex; gap: 8px; }
+.primary {
+  flex: 1; background: linear-gradient(135deg, #818cf8, #c084fc);
+  color: white; border: none; border-radius: 999px;
+  padding: 10px; font-weight: 700; cursor: pointer; font-size: 13px;
+  transition: box-shadow 0.2s, transform 0.15s;
+}
+.primary:hover { box-shadow: 0 0 18px rgba(129, 140, 248, 0.5); }
+.primary:active { transform: scale(0.96); }
+.panic {
+  background: linear-gradient(135deg, #fb7185, #ef4444);
+  color: white; border: none; border-radius: 999px;
+  padding: 10px 13px; font-weight: 800; cursor: pointer; font-size: 13px;
+  transition: box-shadow 0.2s, transform 0.15s;
+}
+.panic:hover { box-shadow: 0 0 18px rgba(239, 68, 68, 0.45); }
+.panic:active { transform: scale(0.96); }

@@ -1,0 +1,79 @@
+{
+  "manifest_version": 3,
+  "name": "Focus Agent",
+  "version": "0.6.2",
+  "description": "AI focus coach for students. Reads your school portal, knows how you actually work, and coaches you through it.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Focus Agent"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/panel.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.blackbaud.com/*",
+        "https://*.myschoolapp.com/*",
+        "https://*.instructure.com/*",
+        "https://classroom.google.com/*",
+        "http://localhost:8000/*"
+      ],
+      "js": [
+        "adapters/schema.js",
+        "adapters/blackbaud.js",
+        "adapters/canvas.js",
+        "adapters/classroom.js",
+        "adapters/mock.js",
+        "adapters/demo.js",
+        "lib/priority.js",
+        "lib/snapshot.js",
+        "lib/ai.js",
+        "content.js",
+        "overlay/coach-overlay.js"
+      ],
+      "css": [
+        "overlay/coach-overlay.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabs",
+    "alarms",
+    "notifications",
+    "sidePanel",
+    "scripting",
+    "identity"
+  ],
+  "host_permissions": [
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*",
+    "https://www.googleapis.com/*",
+    "https://docs.googleapis.com/*",
+    "https://docs.google.com/*",
+    "https://*.myschoolapp.com/*",
+    "https://*.blackbaud.com/*",
+    "https://*.instructure.com/*",
+    "https://classroom.google.com/*"
+  ],
+  "oauth2": {
+    "client_id": "248896287493-2ltb6ivk9v1dkhsn792aa14saogp3br1.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/documents",
+      "https://www.googleapis.com/auth/calendar.events"
+    ]
+  }
+}

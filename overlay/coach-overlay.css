@@ -1,0 +1,43 @@
+/* Focus Agent page-overlay styles — namespaced fa-* so portal CSS stays safe.
+   (The coach bubble itself lives in a shadow DOM; these styles are only for
+   the badges we pin onto the portal's own assignment rows.) */
+
+.fa-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  vertical-align: middle;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.fa-badge-start {
+  background: #6c7cff;
+  color: #fff;
+  animation: fa-glow 1.6s ease-in-out infinite;
+}
+
+.fa-badge-overdue {
+  background: #f87171;
+  color: #fff;
+}
+
+.fa-badge-soon {
+  background: #fbbf24;
+  color: #4a3300;
+}
+
+.fa-badge-dot {
+  background: transparent;
+  color: #8b90a0;
+  border: 1px solid #8b90a0;
+}
+
+@keyframes fa-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(108, 124, 255, 0.7); }
+  50% { box-shadow: 0 0 0 6px rgba(108, 124, 255, 0); }
+}

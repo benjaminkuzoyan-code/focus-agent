@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="header">
+    <span class="logo">◎</span>
+    <span class="title">Focus Agent</span>
+    <span id="streak" class="streak">🔥 0</span>
+  </div>
+
+  <div id="next-up" class="next-up">
+    <div class="label">Next up</div>
+    <div id="next-title" class="next-title">Loading…</div>
+    <div id="next-meta" class="next-meta"></div>
+  </div>
+
+  <div class="actions">
+    <button id="open-panel" class="primary">Open coach panel →</button>
+    <button id="panic" class="panic">😱 Panic</button>
+  </div>
+
+  <!-- Same libs as the panel; the popup is just a mini window onto them. -->
+  <script src="../adapters/schema.js"></script>
+  <script src="../adapters/mock.js"></script>
+  <script src="../lib/storage.js"></script>
+  <script src="../lib/priority.js"></script>
+  <script src="../lib/ai.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

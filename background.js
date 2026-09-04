@@ -1,0 +1,276 @@
+/**
+ * background.js - Service worker: alarms, check-ins, and the distraction watcher.
+ *
+ * Three jobs:
+ *   1. Check-ins  — during a focus session, periodically ask "still on it?"
+ *   2. Watcher    — during a focus session, notice drifts to distracting
+ *                   sites and send a negotiation (not a block) with receipts
+ *   3. Receipts   — commitment deadlines fire a "you said 4pm" notification
+ *
+ * The Coach brain lives in lib/ai.js; when the Claude API key + backend
+ * exist, ClaudeCoach replaces MockCoach there and this file doesn't change.
+ */
+
+importScripts(
+  "adapters/schema.js",
+  "lib/storage.js",
+  "lib/priority.js",
+  "lib/snapshot.js",
+  "lib/google.js",
+  "lib/ai.js"
+);
+
+const CHECKIN_ALARM = "fa-checkin";
+const COMMITMENT_ALARM = "fa-commitments";
+const NUDGE_COOLDOWN_MS = 2 * 60 * 1000; // at most one negotiation per 2 min
+
+const DISTRACTOR_PATTERNS = [
+  /youtube\.com/, /tiktok\.com/, /instagram\.com/, /twitter\.com/, /x\.com/,
+  /reddit\.com/, /netflix\.com/, /twitch\.tv/, /discord\.com/, /pinterest\.com/,
+];
+
+chrome.runtime.onInstalled.addListener((details) => {
+  console.log(`[Focus Agent] v${chrome.runtime.getManifest().version} installed (${details.reason}).`);
+  // (The cached assignment list is deliberately KEPT across reloads — a
+  // slightly stale list beats demo data while portal tabs reconnect.)
+  // Re-inject content scripts into portal tabs that are already open.
+  // Chrome drops them on reload ("Receiving end does not exist"), which
+  // otherwise leaves the panel on demo data until every tab is refreshed.
+  reinjectContentScripts();
+  // Poll commitments every minute so receipts arrive on time.
+  chrome.alarms.create(COMMITMENT_ALARM, { periodInMinutes: 1 });
+});
+
+const PORTAL_MATCHES = ["https://*.blackbaud.com/*", "https://*.myschoolapp.com/*", "https://*.instructure.com/*", "https://classroom.google.com/*", "http://localhost:8000/*"];
+const CONTENT_JS = ["adapters/schema.js", "adapters/blackbaud.js", "adapters/canvas.js", "adapters/classroom.js", "adapters/mock.js", "adapters/demo.js", "lib/priority.js", "lib/snapshot.js", "lib/ai.js", "content.js", "overlay/coach-overlay.js"];
+const CONTENT_CSS = ["overlay/coach-overlay.css"];
+
+async function reinjectContentScripts() {
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({ url: PORTAL_MATCHES });
+  } catch {
+    return;
+  }
+  let injected = 0;
+  for (const tab of tabs) {
+    if (!tab.id) continue;
+    // Skip tabs whose content script is alive — injecting twice would
+    // double the overlay bubble and the message listeners.
+    try {
+      const pong = await chrome.tabs.sendMessage(tab.id, { type: "PING" });
+      if (pong?.ok) continue;
+    } catch {
+      /* no listener = needs injection */
+    }
+    try {
+      injected++;
+      await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: CONTENT_CSS });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: CONTENT_JS });
+    } catch (e) {
+      // Discarded/unloaded tabs and chrome:// pages can't be injected; fine.
+      console.log("[Focus Agent] could not re-inject into", tab.url, e.message);
+    }
+  }
+  console.log(`[Focus Agent] re-injected content scripts into ${injected}/${tabs.length} portal tab(s)`);
+  return injected;
+}
+
+/* ------------------------------------------------------------------ *
+ * Messages from the side panel / popup / content scripts
+ * ------------------------------------------------------------------ */
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  (async () => {
+    switch (message.type) {
+      case "REINJECT": {
+        // Side panel found portal tabs without a content script (typical
+        // right after an extension reload). Re-inject and report.
+        const n = await reinjectContentScripts();
+        sendResponse({ ok: true, tabs: n });
+        break;
+      }
+
+      case "CACHE_ASSIGNMENTS":
+        await FA.store.cacheAssignments(message.assignments, message.source);
+        sendResponse({ ok: true });
+        break;
+
+      case "SESSION_STARTED": {
+        const settings = await FA.store.getSettings();
+        chrome.alarms.create(CHECKIN_ALARM, {
+          periodInMinutes: message.checkinMin || settings.checkinMin,
+        });
+        sendResponse({ ok: true });
+        break;
+      }
+
+      case "SESSION_ENDED":
+        chrome.alarms.clear(CHECKIN_ALARM);
+        sendResponse({ ok: true });
+        break;
+
+      case "GET_COACH_STATE": {
+        // The page overlay sends the assignments it just fetched; we rank
+        // them against stored session history and return the coach's pick,
+        // so the overlay can badge the actual portal rows.
+        const [meta, sessions] = await Promise.all([
+          FA.store.getMeta(),
+          FA.store.getSessions(),
+        ]);
+        const ranked = FA.rankAssignments(message.assignments || [], meta, sessions);
+        const pick = FA.coach.pick(ranked);
+        const activeSession = await FA.store.getActiveSession();
+        sendResponse({ ranked, pick, activeSession });
+        break;
+      }
+
+      case "START_SESSION_FROM_PAGE": {
+        // Coach bubble's "Start focus" — same flow the side panel uses.
+        const a = message.assignment;
+        const plannedMin = Math.min(Math.max(a?.estMin || 25, 15), 50);
+        await FA.store.startSession(a, plannedMin);
+        const settings = await FA.store.getSettings();
+        chrome.alarms.create(CHECKIN_ALARM, { periodInMinutes: settings.checkinMin });
+        sendResponse({ ok: true, plannedMin });
+        break;
+      }
+
+      case "END_SESSION_FROM_PAGE": {
+        chrome.alarms.clear(CHECKIN_ALARM);
+        const record = await FA.store.endSession();
+        sendResponse({ ok: true, record });
+        break;
+      }
+
+      default:
+        sendResponse({ error: `Unknown message: ${message.type}` });
+    }
+  })();
+  return true; // async
+});
+
+/* ------------------------------------------------------------------ *
+ * Alarms: check-ins + commitment receipts
+ * ------------------------------------------------------------------ */
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === CHECKIN_ALARM) {
+    const session = await FA.store.getActiveSession();
+    if (!session) {
+      chrome.alarms.clear(CHECKIN_ALARM);
+      return;
+    }
+    chrome.notifications.create(`fa-checkin-${Date.now()}`, {
+      type: "basic",
+      iconUrl: "icons/icon128.png",
+      title: "Focus check-in",
+      message: `Still on "${session.title}"?`,
+      buttons: [{ title: "Locked in 🔒" }, { title: "Got distracted 😬" }],
+      priority: 1,
+    });
+  }
+
+  if (alarm.name === COMMITMENT_ALARM) {
+    await fireDueCommitments();
+  }
+});
+
+/** Commitment Receipts: "you told me 4pm" — the coach that remembers. */
+async function fireDueCommitments() {
+  const commitments = await FA.store.getCommitments();
+  const now = Date.now();
+  for (const c of commitments) {
+    if (c.keptAt || c.missedAt || c.notifiedAt) continue;
+    if (c.dueAt <= now) {
+      c.notifiedAt = now; // mark before notifying so we never double-fire
+      await chrome.storage.local.set({ commitments });
+      chrome.notifications.create(`fa-commit-${c.id}`, {
+        type: "basic",
+        iconUrl: "icons/icon128.png",
+        title: "Receipts 🧾",
+        message: `You told me: "${c.text}". That was the plan. Starting now?`,
+        buttons: [{ title: "Starting now ✅" }, { title: "Not today ❌" }],
+        priority: 2,
+        requireInteraction: true,
+      });
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Notification button handling
+ * ------------------------------------------------------------------ */
+chrome.notifications.onButtonClicked.addListener(async (notifId, buttonIndex) => {
+  if (notifId.startsWith("fa-checkin-")) {
+    const session = await FA.store.getActiveSession();
+    if (!session) return;
+    if (buttonIndex === 0) {
+      await FA.store.updateActiveSession({ checkins: (session.checkins || 0) + 1 });
+    } else {
+      // Honest self-report counts as a distraction — the data is for the
+      // student, not surveillance, so honesty is the whole point.
+      await FA.store.addDistractionEvent("self-reported");
+    }
+  }
+
+  if (notifId.startsWith("fa-commit-")) {
+    const id = notifId.replace("fa-commit-", "");
+    await FA.store.resolveCommitment(id, buttonIndex === 0);
+  }
+
+  chrome.notifications.clear(notifId);
+});
+
+/* ------------------------------------------------------------------ *
+ * Distraction watcher: negotiate, don't block
+ * ------------------------------------------------------------------ */
+async function checkTabForDrift(tabId) {
+  const session = await FA.store.getActiveSession();
+  if (!session) return;
+
+  let tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch {
+    return; // tab is gone
+  }
+  if (!tab?.url) return;
+
+  let host;
+  try {
+    host = new URL(tab.url).hostname;
+  } catch {
+    return;
+  }
+  if (!DISTRACTOR_PATTERNS.some((p) => p.test(host))) return;
+
+  // Rate-limit the nudges so the coach isn't a nag.
+  if (Date.now() - (session.lastNudgeAt || 0) < NUDGE_COOLDOWN_MS) return;
+
+  // How much work is left, at this student's actual pace?
+  const elapsedMin = Math.round((Date.now() - session.startedAt) / 60000);
+  const remainingMin = Math.max(session.plannedMin - elapsedMin, 3);
+
+  await FA.store.updateActiveSession({ lastNudgeAt: Date.now() });
+  await FA.store.addDistractionEvent(host);
+
+  chrome.notifications.create(`fa-nudge-${Date.now()}`, {
+    type: "basic",
+    iconUrl: "icons/icon128.png",
+    title: "Coach here 👀",
+    message: FA.coach.negotiationLine(session, remainingMin, host),
+    priority: 2,
+  });
+}
+
+chrome.tabs.onActivated.addListener(({ tabId }) => checkTabForDrift(tabId));
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url) checkTabForDrift(tabId);
+});
+
+/* ------------------------------------------------------------------ *
+ * Open the side panel when the toolbar icon is clicked (popup still
+ * works; this makes the panel one click away too).
+ * ------------------------------------------------------------------ */
+chrome.sidePanel
+  ?.setPanelBehavior({ openPanelOnActionClick: false })
+  .catch(() => {});
