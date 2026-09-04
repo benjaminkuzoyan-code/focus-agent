@@ -207,7 +207,7 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   $("dev-toggle").dispatchEvent(new window.Event("change", { bubbles: true }));
   await sleep(100);
   check("dev toggle flips body.dev + persists", window.document.body.classList.contains("dev") && store.settings?.devMode === true);
-  check("dev chips present (4)", window.document.querySelectorAll("#work-chips .chat-chip.dev").length === 4);
+  check("dev chips present (5)", window.document.querySelectorAll("#work-chips .chat-chip.dev").length === 5);
   check("nightly + auto-done settings rows exist", Boolean($("nightly-toggle") && $("auto-done-toggle")));
   $("more-btn").click();
   await sleep(100);

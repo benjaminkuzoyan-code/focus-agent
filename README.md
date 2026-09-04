@@ -61,11 +61,14 @@ The side panel is **one screen in three states**. Everything else lives behind �
 
 Still running underneath: tab parking (distractors move to a minimized window — nothing closed), distraction negotiation with receipts, check-in notifications, Focus Forecast, avoidance detection, streaks.
 
-**Developer mode** (▸more → settings) is Ben's build — the coach does the work. Off by default; never on in the student build:
+**format my doc** (every build, v0.7.5): one chip restyles the assignment's Google Doc — MLA by default (Times New Roman 12, double-spaced, 1" margins, centered title, indented paragraphs, `- ` lines become real bullets). Formatting only: it never changes a word. Index math lives in `lib/docops.js` (pure, unit-tested by `scripts/test-docops.js`).
+
+**Developer mode** (⚙ → settings) is Ben's build — the coach does the work. Off by default; never on in the student build:
 - `write this step` — the coach writes the current step, finished, **into your Google Doc** (a headed block at the end) and checks it off; without a doc it lands in the chat to paste.
 - `answer these` — every question answered, into the doc or the chat.
 - `📷 photo of my work` — snap paper work; the coach (via the bridge, which saves the photo and reads it) checks off the steps it can see and gives one line of feedback.
 - `mark it complete` — ticks the assignment in myPoly. **Pending a spike:** `adapters/blackbaud.js` `markComplete` throws until the portal's own request is captured (DevTools → Network → tick an assignment by hand → copy URL/method/body).
+- `edit my doc…` — type an instruction; the coach reads the doc as numbered paragraphs and returns edit ops (replaceAll, setStyle, insertAfter, replaceParagraph, deleteParagraph, append, replaceBody) that are applied in place. Full write access, anywhere in the doc.
 - **auto-actions on done** (setting) — tick complete in myPoly + a Calendar block for the next item, reported under the debrief.
 - **nightly auto-plan** (setting) — 4:30pm: rank the cached assignments, build tonight's plan (same engine as the time chips), write the blocks to Google Calendar, one notification. S04 does this by hand in ChatGPT every night.
 

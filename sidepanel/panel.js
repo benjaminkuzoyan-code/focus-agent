@@ -1063,6 +1063,10 @@ async function runChip(cmd) {
     case "add-step":
       $("step-input").focus();
       return;
+    case "format":
+      return formatMyDoc();
+    case "dev-edit":
+      return devEditDoc();
     case "dev-write":
       return devWriteStep(cur);
     case "dev-answer":
@@ -1075,9 +1079,61 @@ async function runChip(cmd) {
   }
 }
 
+/** Which doc are we talking about? The assignment's, else the one in the active tab. */
+async function docTarget(assignment) {
+  const { id, url } = await docFor(assignment);
+  if (id) return { id, url };
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const m = tab?.url?.match(/docs\.google\.com\/document\/d\/([\w-]+)/);
+  if (m) {
+    await FA.store.patchAssignmentMeta(assignment.id, { docUrl: tab.url.split("#")[0], docId: m[1] });
+    return { id: m[1], url: tab.url };
+  }
+  return { id: null, url: null };
+}
+
+/** Formatting only — every build. Never changes the words. */
+async function formatMyDoc() {
+  const { id } = await docTarget(current.assignment);
+  if (!id) return pushCoach("Open the Google Doc for this assignment in a tab (or start one with Smart Start) and tap format again.");
+  if (!(await FA.google.isConnected().catch(() => false))) return pushCoach("Connect Google first (⚙ → connect G) — then I can format the doc.");
+  showWorkTyping();
+  try {
+    const r = await FA.google.formatDoc(id, "mla");
+    $("work-typing")?.remove();
+    return pushCoach(r.applied ? `✨ formatted: Times New Roman 12, double-spaced, 1" margins, title centered, paragraphs indented — ${r.paragraphs} paragraphs, words untouched.` : "The doc is empty — nothing to format yet.", { kind: "nudge" });
+  } catch (e) {
+    $("work-typing")?.remove();
+    return pushCoach(`Couldn't format the doc: ${e.message}`);
+  }
+}
+
 /* ------------------------------------------------------------------ *
  * Ben's build — the coach does the work (developer mode only)
  * ------------------------------------------------------------------ */
+
+/** Dev: free-form edits to the doc, decided by the brain, applied in place. */
+async function devEditDoc() {
+  const instruction = window.prompt("What should the coach change in the doc?", "");
+  if (!instruction) return;
+  const { id } = await docTarget(current.assignment);
+  if (!id) return pushCoach("No doc for this assignment — open it in a tab first.");
+  showWorkTyping();
+  try {
+    const doc = await FA.google.getDoc(id);
+    const r = await Promise.resolve(FA.coach.editDoc(current.assignment, FA.docOps.outline(doc), instruction));
+    if (!r.ops?.length) {
+      $("work-typing")?.remove();
+      return pushCoach(r.error || "The coach had no edits for that.");
+    }
+    const applied = await FA.google.editDoc(id, r.ops);
+    $("work-typing")?.remove();
+    return pushCoach(`✍️ ${r.summary || "edited the doc"} (${applied.applied} change${applied.applied === 1 ? "" : "s"}).`, { kind: "dev" });
+  } catch (e) {
+    $("work-typing")?.remove();
+    return pushCoach(`Couldn't edit the doc: ${e.message}`);
+  }
+}
 async function docFor(assignment) {
   const meta = await FA.store.getMeta();
   const m = meta?.[assignment.id] || {};

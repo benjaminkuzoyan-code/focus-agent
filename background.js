@@ -16,6 +16,7 @@ importScripts(
   "lib/storage.js",
   "lib/priority.js",
   "lib/snapshot.js",
+  "lib/docops.js",
   "lib/google.js",
   "lib/ai.js"
 );

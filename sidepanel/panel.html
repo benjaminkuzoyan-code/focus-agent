@@ -112,11 +112,13 @@
         <button class="chat-chip" data-cmd="precheck" title="Tutor feedback on your draft — pointers, never rewrites">check my draft</button>
         <button class="chat-chip" data-cmd="stuck">I'm stuck</button>
         <button class="chat-chip" data-cmd="more5">5 more minutes</button>
+        <button class="chat-chip" data-cmd="format" title="Restyle your Google Doc (MLA: Times 12, double-spaced, 1&quot; margins). Never changes your words.">format my doc</button>
         <!-- Ben's build only (settings → developer mode) -->
         <button class="chat-chip dev" data-cmd="dev-write" title="Dev: the coach writes the current step">write this step</button>
         <button class="chat-chip dev" data-cmd="dev-answer" title="Dev: the coach answers the questions">answer these</button>
         <button class="chat-chip dev" data-cmd="dev-photo" title="Dev: photo of paper work → steps checked + feedback">📷 photo of my work</button>
         <button class="chat-chip dev" data-cmd="dev-complete" title="Dev: tick it complete in myPoly">mark it complete</button>
+        <button class="chat-chip dev" data-cmd="dev-edit" title="Dev: tell the coach what to change in the doc — it edits in place">edit my doc…</button>
       </div>
       <input type="file" id="photo-input" accept="image/*" capture="environment" class="hidden" />
       <div class="chat-input-row">
@@ -262,6 +264,7 @@
   <script src="../lib/storage.js"></script>
   <script src="../lib/priority.js"></script>
   <script src="../lib/snapshot.js"></script>
+  <script src="../lib/docops.js"></script>
   <script src="../lib/google.js"></script>
   <script src="../lib/forecast.js"></script>
   <script src="../lib/xp.js"></script>

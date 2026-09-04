@@ -213,6 +213,28 @@ def build_read_photo(p):
     ), ["legible", "stepsDone", "feedback"]
 
 
+def build_edit_doc(p):
+    return (
+        f"{COACH_IDENTITY}\n\n"
+        "DEVELOPER MODE: you have full write access to the student's Google Doc. "
+        "Carry out their instruction exactly, editing the document in place.\n\n"
+        f"Assignment: {json.dumps(p.get('assignment', {}))}\n"
+        f"The doc, as numbered paragraphs (i = paragraph index you address ops to):\n"
+        f"{json.dumps(p.get('outline', []))}\n\n"
+        f"Instruction: {str(p.get('instruction', ''))[:800]}\n\n"
+        "Reply with a list of edit ops, applied together. Allowed ops:\n"
+        '  {"type":"replaceAll","find":"<exact text>","replace":"<text>"}\n'
+        '  {"type":"setStyle","paragraph":<i>,"style":"TITLE|HEADING_1|HEADING_2|HEADING_3|NORMAL_TEXT"}\n'
+        '  {"type":"insertAfter","paragraph":<i>,"text":"<one or more paragraphs>"}\n'
+        '  {"type":"replaceParagraph","paragraph":<i>,"text":"<new words for that paragraph>"}\n'
+        '  {"type":"deleteParagraph","paragraph":<i>}\n'
+        '  {"type":"append","text":"<text>"}\n'
+        '  {"type":"replaceBody","text":"<the whole new document>"}  (only when asked to rewrite everything)\n'
+        "Write finished prose where prose is asked for -- no placeholders, no notes to self. "
+        'Reply JSON: {"ops": [...], "summary": "<≤20 words: what you changed>"}'
+    ), ["ops"]
+
+
 def build_autopsy(p):
     return (
         f"{COACH_IDENTITY}\n\n"
@@ -401,6 +423,7 @@ BUILDERS = {
     "writeStep": build_write_step,
     "answerAll": build_answer_all,
     "readPhoto": build_read_photo,
+    "editDoc": build_edit_doc,
     "autopsy": build_autopsy,
     "chat": build_chat,
     "explain": build_explain,
