@@ -242,6 +242,50 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   await sleep(300);
   $("done-close").click();
 
+  // Chat hygiene + study mode
+  const cardsAll = [...window.document.querySelectorAll("#today-list .card")];
+  const titles = cardsAll.map((c) => c.querySelector(".card-title").textContent);
+  const testIdx = titles.findIndex((x) => /test|quiz|exam/i.test(x));
+  check("mock data has a test to study for", testIdx >= 0, titles.join(" | ").slice(0, 80));
+  cardsAll[testIdx >= 0 ? testIdx : 0].querySelector(".start").click();
+  await sleep(600);
+  check("study chips visible for a test", window.document.body.classList.contains("studying") && window.getComputedStyle(window.document.querySelector('[data-cmd="quiz"]')).display !== "none");
+  // attach a local text file the way a drop would (also exercises the local-file path)
+  await window.eval('attachLocalFiles([new File(["The Treaty of Versailles was the agreement that ended World War I in 1919. Reparations are payments a defeated country makes to the winners."], "notes.txt", {type:"text/plain"})])');
+  await sleep(300);
+  const localChip = window.document.querySelector("#files-list .file-chip");
+  check("local file attached and read", localChip && Object.values(store.assignmentMeta).some((m) => (m.files || []).some((f) => f.kind === "local" && f.chars > 50)), localChip ? localChip.title : "no chip");
+  window.document.querySelector('[data-cmd="flashcards"]').click();
+  await sleep(500);
+  const cardEls = window.document.querySelectorAll("#work-messages .fcard");
+  check("rules flashcards built from definition sentences", cardEls.length >= 1, `${cardEls.length} cards`);
+  cardEls[0]?.click();
+  check("card flips", cardEls[0]?.classList.contains("flip"));
+  window.document.querySelector('[data-cmd="studyplan"]').click();
+  await sleep(400);
+  check("study plan adds dated steps", [...window.document.querySelectorAll("#steps .step-text")].some((s) => s.textContent.startsWith("📅")));
+  const msgsBefore = window.document.querySelectorAll("#work-messages .msg").length;
+  window.document.querySelector('[data-cmd="clear"]').click();
+  await sleep(150);
+  check("clear chat empties the thread", window.document.querySelectorAll("#work-messages .msg").length === 0 && msgsBefore > 0);
+  const tid = store.activeSession.assignmentId;
+  await window.eval("pushCoach('hello')");
+  $("work-done").click();
+  await sleep(500);
+  check("finishing an assignment clears its chat log", (store.assignmentMeta[tid].thread || []).length === 0);
+  check("…but keeps its files", (store.assignmentMeta[tid].files || []).length >= 1);
+  $("done-close").click();
+  // a non-test assignment hides study chips
+  const other = cardsAll.findIndex((c, i) => i !== testIdx && !/test|quiz|exam/i.test(c.querySelector(".card-title").textContent));
+  window.document.querySelectorAll("#today-list .card")[0].querySelector(".start").click();
+  await sleep(500);
+  check("study chips hidden for non-test work", !window.document.body.classList.contains("studying") || /test|quiz|exam/i.test($("work-title").textContent));
+  check("Smart Start clears the general chat", (store.chatHistory || []).length === 0);
+  $("work-stop").click();
+  await sleep(300);
+  $("done-close").click();
+  check("settings: connect my school + debug info present", Boolean($("connect-portal-btn") && $("debug-btn")));
+
   // time budget → inline plan
   window.document.querySelector('.time-chip[data-min="60"]').click();
   await sleep(300);

@@ -14,6 +14,13 @@ console.log(
   window.location.href
 );
 
+// A portal the student connected by hand (⚙ → connect my school) tells us
+// which adapter to use on a domain we don't recognise (canvas.school.org).
+const portalOverrideReady = chrome.storage.local.get("customPortals").then((o) => {
+  FA.portalOverride = o.customPortals?.[location.origin] || null;
+});
+let lastFetch = { at: 0, count: 0, error: "" };
+
 /** Pick the adapter whose matches() claims this host. */
 function detectAdapter() {
   const host = window.location.hostname;
@@ -24,9 +31,17 @@ function detectAdapter() {
 }
 
 async function fetchNormalized() {
+  await portalOverrideReady;
   const adapter = detectAdapter();
   if (!adapter) throw new Error(`No adapter for host: ${window.location.hostname}`);
-  const assignments = await adapter.fetchAssignments();
+  let assignments;
+  try {
+    assignments = await adapter.fetchAssignments();
+    lastFetch = { at: Date.now(), count: assignments.length, error: "" };
+  } catch (e) {
+    lastFetch = { at: Date.now(), count: 0, error: e.message };
+    throw e;
+  }
 
   // Cache in the background so the side panel works away from this tab.
   chrome.runtime.sendMessage({
@@ -76,6 +91,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((assignments) => sendResponse({ assignments }))
       .catch((err) => sendResponse({ error: err.message }));
     return true; // async response
+  }
+  if (message.type === "DETECT_PORTAL") {
+    portalOverrideReady.then(() => {
+      const d = FA.detectPortal();
+      const adapter = detectAdapter();
+      sendResponse({ ...d, adapter: adapter?.name || null, override: FA.portalOverride || null, lastFetch });
+    });
+    return true;
   }
   if (message.type === "MARK_COMPLETE") {
     // Ben's build: flip the portal's own "completed" checkbox. Throws until

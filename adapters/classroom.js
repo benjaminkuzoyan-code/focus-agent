@@ -45,8 +45,9 @@
 
   FA.adapters = FA.adapters || {};
   FA.adapters.classroom = {
+    name: "classroom",
     matches(host) {
-      return host === "classroom.google.com";
+      return host === "classroom.google.com" || FA.portalOverride === "classroom";
     },
 
     async fetchAssignments() {

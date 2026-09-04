@@ -61,6 +61,12 @@ The side panel is **one screen in three states**. Everything else lives behind �
 
 Still running underneath: tab parking (distractors move to a minimized window — nothing closed), distraction negotiation with receipts, check-in notifications, Focus Forecast, avoidance detection, streaks.
 
+**Study mode** (v0.8.0): when the assignment is a test or quiz, three more chips appear in the work view — **quiz me** (one question at a time from your files and course topics; honest ✓/✗ grading with a running score; misses come back later), **flashcards** (from your files and highlights; tap to flip; *copy for Quizlet* puts them on the clipboard as term ⇥ definition), **study plan** (one 20-minute session per day until the test, added to your checklist; last day is a no-notes self-quiz).
+
+**Other schools** (v0.8.0): ⚙ → **connect my school** while your school's assignment page is open. Canvas works on any domain (not just instructure.com); Blackbaud and Google Classroom too. Unsupported systems (Schoology, PowerSchool, Brightspace, Blackboard, Moodle…) are recognised and named. **copy debug info** copies a report — version, portal detected, adapter result, snapshot errors, never cookies or passwords — to paste to Ben.
+
+**Chat hygiene:** each assignment's chat is its own; finishing an assignment clears it (steps and files stay); starting a new Smart Start clears the general chat; **clear chat** wipes the current one.
+
 **Files the coach can see** (v0.7.7): every assignment has a files box in the work view. Drop a PDF or text file on it, tap **+ this tab** to attach the page / Google Doc / PDF you're reading, or let Smart Start file what it opened. Text is extracted once (Docs API, bundled pdf.js, or the page's main text) and cached per assignment, so the coach still sees the reading — and your highlights and notes on it — whichever tab is active. This is the assignment's memory.
 
 **format my doc** (every build, v0.7.5): one chip restyles the assignment's Google Doc — MLA by default (Times New Roman 12, double-spaced, 1" margins, centered title, indented paragraphs, `- ` lines become real bullets). Formatting only: it never changes a word. Index math lives in `lib/docops.js` (pure, unit-tested by `scripts/test-docops.js`).

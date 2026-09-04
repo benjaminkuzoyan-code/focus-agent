@@ -127,6 +127,11 @@
         <button class="chat-chip" data-cmd="stuck">I'm stuck</button>
         <button class="chat-chip" data-cmd="more5">5 more minutes</button>
         <button class="chat-chip" data-cmd="format" title="Restyle your Google Doc (MLA: Times 12, double-spaced, 1&quot; margins). Never changes your words.">format my doc</button>
+        <!-- study mode: shown for tests/quizzes (body.studying) -->
+        <button class="chat-chip study" data-cmd="quiz" title="The coach asks one question at a time from your files and grades your answers">quiz me</button>
+        <button class="chat-chip study" data-cmd="flashcards" title="Flashcards from your files + highlights; copy them straight into Quizlet">flashcards</button>
+        <button class="chat-chip study" data-cmd="studyplan" title="Spread the studying over the days until the test — as checklist steps">study plan</button>
+        <button class="chat-chip" data-cmd="clear" title="Clear this assignment's chat">clear chat</button>
         <!-- Ben's build only (settings → developer mode) -->
         <button class="chat-chip dev" data-cmd="dev-write" title="Dev: the coach writes the current step">write this step</button>
         <button class="chat-chip dev" data-cmd="dev-answer" title="Dev: the coach answers the questions">answer these</button>
@@ -219,6 +224,18 @@
 
     <!-- ============ ⚙ SETTINGS ============ -->
     <section id="view-more" class="view">
+      <div class="section-title">your school</div>
+      <div class="settings">
+        <div class="settings-row">
+          <span>connect the portal in the active tab <span id="portal-note" class="muted small"></span></span>
+          <button id="connect-portal-btn" class="chip chip-btn" title="Open your school's assignment page in a tab, then tap">connect my school</button>
+        </div>
+        <div class="settings-row">
+          <span>something broke? send us the details <span class="muted small">(no passwords or cookies — ever)</span></span>
+          <button id="debug-btn" class="chip chip-btn">copy debug info</button>
+        </div>
+      </div>
+
       <div class="section-title">settings</div>
       <div class="settings">
         <div class="settings-row">

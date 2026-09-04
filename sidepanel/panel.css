@@ -695,3 +695,13 @@ body:not(.dev) .dev { display: none !important; }
 .file-chip .f-x:hover { color: var(--red); }
 .file-chip.loading { opacity: 0.6; }
 .file-chip.error { border: 1px solid rgba(251, 113, 133, 0.4); }
+
+/* ---------- study mode ---------- */
+body:not(.studying) .study { display: none !important; }
+.chat-chip.study { border-color: rgba(192, 132, 252, 0.45); color: #d8b4fe; }
+.cards { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.fcard { background: var(--glass-strong); border-radius: var(--r-sm); padding: 8px 10px; cursor: pointer; font-size: 12.5px; line-height: 1.45; }
+.fcard .q { font-weight: 650; }
+.fcard .a { color: var(--green); margin-top: 4px; display: none; }
+.fcard.flip .a { display: block; }
+.fcard .hint { color: var(--muted); font-size: 10.5px; margin-top: 2px; }

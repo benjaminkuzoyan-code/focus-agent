@@ -109,7 +109,9 @@
   FA.adapters.blackbaud = {
     markComplete,
     /** True when the current page is a Blackbaud portal. */
+    name: "blackbaud",
     matches(host) {
+      if (FA.portalOverride === "blackbaud") return true;
       return /myschoolapp\.com$|blackbaud\.com$/.test(host);
     },
 

@@ -65,6 +65,33 @@ async function syncToolbarScript() {
     console.warn("[Focus Agent] toolbar registration failed:", e.message);
   }
 }
+/**
+ * Custom portals (⚙ → connect my school): the full portal content-script
+ * bundle registered on the origins the student connected, so Canvas on
+ * canvas.school.org behaves exactly like *.instructure.com.
+ */
+async function syncPortalScripts() {
+  const { customPortals = {} } = await chrome.storage.local.get("customPortals");
+  const origins = Object.keys(customPortals).map((o) => o + "/*");
+  try {
+    const existing = await chrome.scripting.getRegisteredContentScripts({ ids: ["fa-custom-portal"] });
+    if (!origins.length) {
+      if (existing.length) await chrome.scripting.unregisterContentScripts({ ids: ["fa-custom-portal"] });
+      return;
+    }
+    const def = { id: "fa-custom-portal", matches: origins, js: CONTENT_JS, css: CONTENT_CSS, runAt: "document_idle", persistAcrossSessions: true };
+    if (existing.length) await chrome.scripting.updateContentScripts([def]);
+    else await chrome.scripting.registerContentScripts([def]);
+    console.log(`[Focus Agent] portal scripts registered on ${origins.join(", ")}`);
+  } catch (e) {
+    console.warn("[Focus Agent] portal registration failed:", e.message);
+  }
+}
+chrome.runtime.onStartup.addListener(syncPortalScripts);
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.customPortals) syncPortalScripts();
+});
+
 chrome.permissions.onAdded.addListener(syncToolbarScript);
 chrome.permissions.onRemoved.addListener(syncToolbarScript);
 chrome.runtime.onStartup.addListener(syncToolbarScript);
@@ -120,6 +147,7 @@ chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
 chrome.runtime.onInstalled.addListener((details) => {
   console.log(`[Focus Agent] v${chrome.runtime.getManifest().version} installed (${details.reason}).`);
   syncToolbarScript();
+  syncPortalScripts();
   ensureContextMenu();
   // (The cached assignment list is deliberately KEPT across reloads — a
   // slightly stale list beats demo data while portal tabs reconnect.)
@@ -132,13 +160,14 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 const PORTAL_MATCHES = ["https://*.blackbaud.com/*", "https://*.myschoolapp.com/*", "https://*.instructure.com/*", "https://classroom.google.com/*", "http://localhost:8000/*"];
-const CONTENT_JS = ["adapters/schema.js", "adapters/blackbaud.js", "adapters/canvas.js", "adapters/classroom.js", "adapters/mock.js", "adapters/demo.js", "lib/priority.js", "lib/snapshot.js", "lib/ai.js", "content.js", "overlay/coach-overlay.js"];
+const CONTENT_JS = ["adapters/schema.js", "adapters/detect.js", "adapters/blackbaud.js", "adapters/canvas.js", "adapters/classroom.js", "adapters/mock.js", "adapters/demo.js", "lib/priority.js", "lib/snapshot.js", "lib/ai.js", "content.js", "overlay/coach-overlay.js"];
 const CONTENT_CSS = ["overlay/coach-overlay.css"];
 
 async function reinjectContentScripts() {
   let tabs = [];
   try {
-    tabs = await chrome.tabs.query({ url: PORTAL_MATCHES });
+    const { customPortals = {} } = await chrome.storage.local.get("customPortals");
+    tabs = await chrome.tabs.query({ url: [...PORTAL_MATCHES, ...Object.keys(customPortals).map((o) => o + "/*")] });
   } catch {
     return;
   }

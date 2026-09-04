@@ -44,6 +44,10 @@ const PORTAL_URL_PATTERNS = [
   "https://*.instructure.com/*",
   "https://classroom.google.com/*",
 ];
+// Portals the student connected by hand (⚙ → connect my school) join the list.
+chrome.storage.local.get("customPortals").then(({ customPortals = {} }) => {
+  for (const o of Object.keys(customPortals)) PORTAL_URL_PATTERNS.push(o + "/*");
+});
 
 /* ------------------------------------------------------------------ *
  * Views
@@ -214,7 +218,8 @@ function schedulePortalRefresh() {
 }
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete" || !tab.url) return;
-  if (/myschoolapp\.com|blackbaud\.com|instructure\.com|classroom\.google\.com/.test(tab.url)) {
+  const custom = PORTAL_URL_PATTERNS.some((p) => p.startsWith("https://") && !p.includes("*.") && tab.url.startsWith(p.slice(0, -2)));
+  if (custom || /myschoolapp\.com|blackbaud\.com|instructure\.com|classroom\.google\.com/.test(tab.url)) {
     schedulePortalRefresh();
   }
 });
@@ -531,6 +536,12 @@ async function smartStart(assignment, minOverride) {
     console.warn("[Focus Agent] Tab parking failed (non-fatal):", e.message);
   }
 
+  // The general "ask the coach anything" chat is about the week; a new
+  // assignment starts it fresh so nothing bleeds between assignments.
+  chatHistory = [];
+  await chrome.storage.local.set({ chatHistory: [] });
+  renderChatMessages();
+
   // 2. Start the clock and land in the work view immediately — everything
   //    else streams in. Waiting on tabs or the brain is how starts die.
   const active = await FA.store.getActiveSession();
@@ -642,6 +653,7 @@ async function enterWork(assignment) {
   };
   renderFiles();
 
+  document.body.classList.toggle("studying", assignment.type === "test");
   $("work-title").textContent = assignment.title;
   $("work-meta").textContent = [assignment.course, dueLabel(assignment), assignment.estMin ? `~${assignment.estMin} min` : ""].filter(Boolean).join(" · ");
   renderSteps();
@@ -890,7 +902,11 @@ async function attachLocalFiles(fileList) {
         f.text = r.text.slice(0, FILE_TEXT_CAP);
         f.pages = r.pages;
       } else {
-        f.text = (await file.text()).slice(0, FILE_TEXT_CAP);
+        // Blob.text() is missing in some environments; FileReader always works.
+        const raw = typeof file.text === "function"
+          ? await file.text()
+          : await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsText(file); });
+        f.text = String(raw || "").slice(0, FILE_TEXT_CAP);
       }
       f.chars = f.text.length;
       if (!f.chars) f.error = "no text found (scanned PDF? try a photo instead)";
@@ -1078,6 +1094,7 @@ function renderThread() {
     const el = document.createElement("div");
     el.className = "msg " + (m.role === "user" ? "me" : "coach") + (m.kind ? ` k-${m.kind}` : "");
     el.textContent = m.text;
+    if (m.kind === "cards" && Array.isArray(m.cards)) renderCards(el, m.cards);
     if (m.actions?.length && !m.used) {
       const row = document.createElement("div");
       row.className = "msg-actions";
@@ -1181,6 +1198,7 @@ async function sendWork(text) {
     devMode: Boolean(settings.devMode),
     googleConnected,
     docTarget: target.id ? { id: target.id, url: target.url } : null,
+    quiz: Boolean(current.quiz),
     focus: {
       assignment: current.assignment,
       steps: current.steps,
@@ -1321,6 +1339,21 @@ async function runChip(cmd) {
       return;
     case "format":
       return formatMyDoc();
+    case "clear": {
+      current.thread = [];
+      current.quiz = false;
+      renderThread();
+      await saveThread();
+      return;
+    }
+    case "quiz":
+      current.quiz = !current.quiz;
+      if (!current.quiz) return pushCoach("Quiz over. Ask me anything or hit quiz me to go again.", { kind: "nudge" });
+      return sendWork(current.files.length ? "Quiz me on what's in my files. One question at a time." : "Quiz me on this topic. One question at a time.");
+    case "flashcards":
+      return makeFlashcards();
+    case "studyplan":
+      return makeStudyPlan();
     case "dev-edit":
       return devEditDoc();
     case "dev-write":
@@ -1334,6 +1367,166 @@ async function runChip(cmd) {
       return devMarkComplete(current.assignment);
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * Study mode (tests): flashcards · quiz · study plan
+ * ------------------------------------------------------------------ */
+async function makeFlashcards() {
+  showWorkTyping();
+  const files = await filesForBrain();
+  const r = await Promise.resolve(FA.coach.flashcards(current.assignment, files));
+  $("work-typing")?.remove();
+  if (!r.cards?.length) return pushCoach(r.error || "Attach the reading or your notes (+ this tab) and I'll make cards from them.");
+  return pushCoach(`${r.fromClaude ? "🧠 " : ""}${r.cards.length} cards — tap one to flip. “copy for Quizlet” puts them on your clipboard as term ⇥ definition.`, { kind: "cards", cards: r.cards });
+}
+
+async function makeStudyPlan() {
+  showWorkTyping();
+  const topics = snapshot?.topics?.[current.assignment.sectionId] || [];
+  const files = await filesForBrain();
+  const r = await Promise.resolve(FA.coach.studyPlan(current.assignment, { topics, files }));
+  $("work-typing")?.remove();
+  if (!r.sessions?.length) return pushCoach(r.error || "I need a due date on the test to spread the studying out.");
+  const steps = FA.normalizeSteps(r.sessions.map((s) => ({ text: `📅 ${s.day}: ${s.text}`, deliverable: s.deliverable || "", estMin: s.estMin || 20 })), current.assignment, r.fromClaude ? "claude" : "rules");
+  current.steps = [...current.steps.filter((s) => s.done), ...steps];
+  renderSteps();
+  await saveSteps();
+  return pushCoach(`${r.fromClaude ? "🧠 " : ""}Study plan: ${steps.length} sessions between now and the test, added to your checklist. ${r.note || ""}`.trim(), { kind: "nudge" });
+}
+
+/** Cards render inside the thread as flip cards + a Quizlet export. */
+function renderCards(el, cards) {
+  const wrap = document.createElement("div");
+  wrap.className = "cards";
+  for (const c of cards) {
+    const card = document.createElement("div");
+    card.className = "fcard";
+    card.innerHTML = `<div class="q"></div><div class="a"></div><div class="hint">tap to flip</div>`;
+    card.querySelector(".q").textContent = c.q;
+    card.querySelector(".a").textContent = c.a;
+    card.addEventListener("click", () => card.classList.toggle("flip"));
+    wrap.appendChild(card);
+  }
+  const row = document.createElement("div");
+  row.className = "msg-actions";
+  const b = document.createElement("button");
+  b.textContent = "copy for Quizlet";
+  b.title = "Quizlet → Create set → Import: paste, 'tab' between term and definition, 'new line' between cards";
+  b.addEventListener("click", async () => {
+    const tsv = cards.map((c) => `${c.q.replace(/\t|\n/g, " ")}\t${c.a.replace(/\t|\n/g, " ")}`).join("\n");
+    try {
+      await navigator.clipboard.writeText(tsv);
+      b.textContent = "copied ✓ — Quizlet → Import";
+    } catch {
+      b.textContent = "copy failed";
+    }
+  });
+  row.appendChild(b);
+  el.appendChild(wrap);
+  el.appendChild(row);
+}
+
+/* ------------------------------------------------------------------ *
+ * Other schools: connect a portal by hand, and ship debug info instead of "it broke"
+ * ------------------------------------------------------------------ */
+async function connectPortalFromTab() {
+  const note = $("portal-note");
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url || !/^https?:/.test(tab.url)) {
+    note.textContent = "open your school's assignment page in a tab first";
+    return;
+  }
+  const origin = new URL(tab.url).origin;
+  note.textContent = "checking…";
+  try {
+    const granted = await chrome.permissions.request({ origins: [origin + "/*"] });
+    if (!granted) {
+      note.textContent = "permission declined";
+      return;
+    }
+    const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["adapters/schema.js", "adapters/detect.js"] }).then(() =>
+      chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => globalThis.FA?.detectPortal?.() || null })
+    );
+    const d = res?.result;
+    if (!d) {
+      note.textContent = "couldn't inspect that page";
+      return;
+    }
+    if (!d.supported) {
+      note.textContent = `${d.type === "unknown" ? "not a school portal we recognise" : d.type + " isn't supported yet"} — tap copy debug info and send it to Ben`;
+      return;
+    }
+    const { customPortals = {} } = await chrome.storage.local.get("customPortals");
+    customPortals[origin] = d.type;
+    await chrome.storage.local.set({ customPortals });
+    if (!PORTAL_URL_PATTERNS.includes(origin + "/*")) PORTAL_URL_PATTERNS.push(origin + "/*");
+    await FA.store.setSettings({ dataSource: "auto" });
+    $("source-select").value = "auto";
+    note.textContent = `${d.type} connected on ${new URL(tab.url).hostname} — reading assignments…`;
+    // The worker registers the scripts on storage change; inject now for this tab.
+    await new Promise((r) => setTimeout(r, 400));
+    await chrome.runtime.sendMessage({ type: "REINJECT" }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 1500));
+    await loadAssignments();
+    await refreshAll();
+    note.textContent = `${d.type} connected · ${assignments.length} assignments${sourceNotice ? " · " + sourceNotice : ""}`;
+  } catch (e) {
+    note.textContent = `couldn't connect: ${e.message}`;
+  }
+}
+
+/** Everything a tester can safely send: what we saw, never who they are. */
+async function copyDebugInfo() {
+  const btn = $("debug-btn");
+  const info = {
+    version: chrome.runtime.getManifest().version,
+    when: new Date().toISOString(),
+    brain: FA.coachBrain,
+    bridge: FA.bridgeHealth ? { stale: FA.bridgeHealth.stale, methods: FA.bridgeHealth.methods?.length } : null,
+    settings: { dataSource: settings.dataSource, mode: settings.mode, devMode: Boolean(settings.devMode) },
+    sourceNotice,
+    assignments: { count: assignments.length, source: assignments[0]?.source || null, types: [...new Set(assignments.map((a) => a.type))], sampleKeys: assignments[0]?.raw ? Object.keys(assignments[0].raw).slice(0, 40) : [] },
+    snapshot: snapshot ? { classes: snapshot.classes?.length, schedule: snapshot.schedule?.length, errors: snapshot.errors || [] } : null,
+    customPortals: (await chrome.storage.local.get("customPortals")).customPortals || {},
+    portalTabs: [],
+    ua: navigator.userAgent,
+  };
+  try {
+    const tabs = await chrome.tabs.query({ url: PORTAL_URL_PATTERNS });
+    for (const tab of tabs.slice(0, 4)) {
+      let det = null;
+      try {
+        det = await chrome.tabs.sendMessage(tab.id, { type: "DETECT_PORTAL" });
+      } catch (e) {
+        det = { error: "no content script (reload the tab)" };
+      }
+      info.portalTabs.push({ host: new URL(tab.url).hostname, path: new URL(tab.url).pathname.slice(0, 60), ...det });
+    }
+    // Also the active tab, in case it's an unrecognised portal.
+    const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (active?.url && /^https?:/.test(active.url) && !tabs.some((t) => t.id === active.id)) {
+      try {
+        await chrome.scripting.executeScript({ target: { tabId: active.id }, files: ["adapters/schema.js", "adapters/detect.js"] });
+        const [r] = await chrome.scripting.executeScript({ target: { tabId: active.id }, func: () => globalThis.FA?.detectPortal?.() || null });
+        info.activeTab = { host: new URL(active.url).hostname, ...(r?.result || {}) };
+      } catch {
+        info.activeTab = { host: new URL(active.url).hostname, note: "no access (tap connect my school first)" };
+      }
+    }
+  } catch {
+    /* fine */
+  }
+  const text = "Focus Agent debug info\n" + JSON.stringify(info, null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    btn.textContent = "copied ✓ — paste it to Ben";
+  } catch {
+    btn.textContent = "copy failed";
+  }
+  setTimeout(() => (btn.textContent = "copy debug info"), 4000);
+}
+$("connect-portal-btn").addEventListener("click", connectPortalFromTab);
+$("debug-btn").addEventListener("click", copyDebugInfo);
 
 /** Which doc are we talking about? The assignment's, else the one in the active tab. */
 async function docTarget(assignment) {
@@ -1553,6 +1746,9 @@ async function finishWork(done) {
   if (done && a) {
     await FA.store.markDone(a.id);
     await FA.store.addQuestEvent(a, a.estMin);
+    // Finished → the chat log for it is over. Steps and files stay for reference.
+    await FA.store.patchAssignmentMeta(a.id, { thread: [] });
+    if (current) current.thread = [];
   }
   await refreshAll();
   renderDone(a, record, done);

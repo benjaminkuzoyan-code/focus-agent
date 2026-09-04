@@ -235,6 +235,40 @@ def build_edit_doc(p):
     ), ["ops"]
 
 
+def build_flashcards(p):
+    files = p.get("files") or []
+    blocks = "\n\n".join(
+        f"### {f.get('title','file')}\n{str(f.get('text',''))[:8000]}"
+        + ("\nStudent highlights: " + json.dumps(f.get("highlights")) if f.get("highlights") else "")
+        for f in files[:6]
+    )
+    return (
+        f"{COACH_IDENTITY}\n\n"
+        f"The student is studying for: {json.dumps(p.get('assignment', {}))}\n\n"
+        f"Their material:\n{blocks or '(no files attached — use the assignment description and course)'}\n\n"
+        "Make flashcards a 9th grader would actually be tested on: terms, dates, "
+        "people, cause→effect, 'why did X' — not trivia. Answers ≤ 25 words, exact "
+        "names and numbers. Prioritize anything they highlighted. 10-20 cards. "
+        'Reply JSON: {"cards": [{"q": "<question or term>", "a": "<answer>"}]}'
+    ), ["cards"]
+
+
+def build_study_plan(p):
+    return (
+        f"{COACH_IDENTITY}\n\n"
+        f"Now: {p.get('now')}\n"
+        f"The test: {json.dumps(p.get('assignment', {}))}\n"
+        f"Course topics/units (from the portal): {json.dumps(p.get('topics', []))}\n"
+        f"Attached material (excerpts): {json.dumps([{'title': f.get('title'), 'text': str(f.get('text',''))[:1500]} for f in (p.get('files') or [])[:4]])}\n\n"
+        "Spread the studying across the days between now and the test (one session "
+        "per day, 15-40 min, last day = full self-quiz without notes). Spaced "
+        "retrieval beats rereading: every session ends with recall from memory. "
+        "Name the specific topic per day when the material shows it. "
+        'Reply JSON: {"sessions": [{"day": "<today|Tue|Wed…>", "text": "<what to do, ≤18 words>", '
+        '"deliverable": "<what exists after, ≤10 words>", "estMin": <int>}], "note": "<≤20 words: the one thing to prioritize>"}'
+    ), ["sessions"]
+
+
 def build_autopsy(p):
     return (
         f"{COACH_IDENTITY}\n\n"
@@ -318,9 +352,21 @@ def build_chat(p):
             "You do not write into the student's documents (tutor, not ghostwriter). If asked, "
             "say what you'd put there and point them at the 'format my doc' chip for formatting.\n\n"
         )
+    quiz_block = ""
+    if p.get("quiz"):
+        quiz_block = (
+            "QUIZ MODE. You are quizzing the student for a test using the attached files "
+            "and course topics. Rules: ONE question per message, then stop and wait. When they "
+            "answer: grade it honestly (✓ or ✗ with the correct answer in one line and WHY), "
+            "keep a running score like 'score 3/5', then ask the next question. Start easy, "
+            "get harder; return to anything they missed later in a new form. Mix recall, "
+            "why-questions and apply-it questions. After ~8 questions give a short summary: "
+            "what's solid, what to restudy. Never answer your own question before they try.\n\n"
+        )
     return (
         f"{COACH_IDENTITY}\n\n"
         f"{_policy(p)}\n\n"
+        f"{quiz_block}"
         "What you can see (be accurate if asked): the student's assignments, grades "
         "and schedule from their school portal; the assignment they're working on, its "
         "checklist, and every FILE ATTACHED to it (readings, PDFs, their doc — with their "
@@ -473,6 +519,8 @@ BUILDERS = {
     "answerAll": build_answer_all,
     "readPhoto": build_read_photo,
     "editDoc": build_edit_doc,
+    "flashcards": build_flashcards,
+    "studyPlan": build_study_plan,
     "autopsy": build_autopsy,
     "chat": build_chat,
     "explain": build_explain,
