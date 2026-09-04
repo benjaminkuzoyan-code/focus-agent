@@ -1185,7 +1185,7 @@ async function sendWork(text) {
   const { doc, note } = await readOpenDoc();
   const session = await FA.store.getActiveSession();
   const files = await filesForBrain();
-  const target = await docFor(current.assignment);
+  const target = await docTarget(current.assignment); // assignment's doc, else the Google Doc in the active tab
   const googleConnected = await FA.google.isConnected().catch(() => false);
 
   const context = {
@@ -2043,11 +2043,23 @@ async function sendChat(text) {
   const weekAgo = Date.now() - 7 * 86400000;
   const week = sessions.filter((s) => s.endedAt > weekAgo);
   const { doc, note } = await readOpenDoc();
+  // The Google Doc in the active tab is the write target for the general chat (dev mode).
+  let target = { id: null, url: null };
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const m = tab?.url?.match(/docs\.google\.com\/document\/d\/([\w-]+)/);
+    if (m) target = { id: m[1], url: tab.url.split("#")[0] };
+  } catch {
+    /* no tab access */
+  }
+  const googleConnected = await FA.google.isConnected().catch(() => false);
   const context = {
     ranked,
     brain: snapshot ? FA.snapshotForBrain(snapshot, { maxAssignments: 0 }) : null,
     mode: settings.mode || "tutor",
     devMode: Boolean(settings.devMode),
+    googleConnected,
+    docTarget: target.id ? target : null,
     doc,
     docNote: note,
     stats: {
@@ -2056,8 +2068,9 @@ async function sendChat(text) {
       minutesThisWeek: week.reduce((a, s) => a + s.actualMin, 0),
     },
   };
-  const { reply } = await Promise.resolve(FA.coach.chat(chatHistory, context));
+  const { reply: raw } = await Promise.resolve(FA.coach.chat(chatHistory, context));
   typing.remove();
+  const reply = await applyDocOpsFromReply(raw, target, googleConnected);
   chatHistory.push({ role: "coach", text: reply, at: Date.now() });
   chatHistory = chatHistory.slice(-40);
   await chrome.storage.local.set({ chatHistory });
