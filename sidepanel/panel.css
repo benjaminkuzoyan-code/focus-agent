@@ -651,3 +651,22 @@ body:not(.dev) .dev { display: none !important; }
   background: var(--glass); border: 1px solid var(--edge);
 }
 .settings-row input[type="checkbox"] { accent-color: #818cf8; width: 16px; height: 16px; }
+
+/* ---------- Ramp chunk chips ---------- */
+.chunk-row { display: flex; align-items: center; gap: 8px; margin: -4px 0 10px; flex-wrap: wrap; }
+.chunk-chips { display: flex; gap: 4px; }
+.chunk-chips button {
+  background: var(--glass); border: 1px solid var(--edge); color: var(--muted);
+  border-radius: 999px; padding: 3px 9px; font-size: 11px; cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.chunk-chips button.active { background: var(--grad); color: white; border-color: transparent; font-weight: 700; }
+.chunk-why { font-size: 10.5px; color: var(--muted); }
+.msg-actions { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
+.msg-actions button {
+  border: none; border-radius: 999px; padding: 5px 11px; font-size: 11.5px; cursor: pointer;
+  background: var(--glass-strong); color: var(--ink);
+}
+.msg-actions button.primary { background: var(--grad); color: white; font-weight: 700; padding: 5px 11px; font-size: 11.5px; }
+.msg.k-checkpoint { border-color: rgba(129, 140, 248, 0.45); }
+.msg.k-ask-done { border-color: rgba(110, 231, 168, 0.45); }
+.msg.k-paper { border-color: rgba(252, 211, 77, 0.45); }

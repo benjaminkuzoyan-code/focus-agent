@@ -18,6 +18,8 @@ vc.on("warn", () => {});
 vc.on("log", () => {});
 
 const store = {}; // fake chrome.storage.local
+const changeListeners = [];
+const emit = (changes) => changeListeners.forEach((fn) => { try { fn(changes, "local"); } catch (e) { errors.push("onChanged: " + e.stack); } });
 const chrome = {
   storage: {
     local: {
@@ -26,10 +28,14 @@ const chrome = {
         if (Array.isArray(keys)) return Object.fromEntries(keys.map((k) => [k, store[k]]));
         return { ...store };
       },
-      async set(obj) { Object.assign(store, obj); },
+      async set(obj) {
+        const changes = Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, { oldValue: store[k], newValue: v }]));
+        Object.assign(store, obj);
+        emit(changes);
+      },
       async remove(k) { (Array.isArray(k) ? k : [k]).forEach((x) => delete store[x]); },
     },
-    onChanged: { addListener() {} },
+    onChanged: { addListener(fn) { changeListeners.push(fn); } },
   },
   permissions: { async request() { return true; }, async getAll() { return { origins: [] }; } },
   tabs: {
@@ -109,17 +115,47 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   check("clock ticking", /^\d+:\d\d$/.test($("work-elapsed").textContent), $("work-elapsed").textContent);
   const active = store.activeSession;
   check("session persisted", Boolean(active && active.plannedMin));
+  check("Ramp proposal with a why", active.chunkWhy?.length > 0 && active.chunkMin === active.plannedMin, `${active.plannedMin} min — ${active.chunkWhy}`);
+  const chips = window.document.querySelectorAll("#chunk-chips button");
+  check("chunk chips 5..25 with proposal selected", chips.length === 5 && [...chips].some((b) => b.classList.contains("active") && Number(b.textContent) === active.plannedMin));
+  [...chips].find((b) => b.textContent === "10").click();
+  await sleep(150);
+  check("tapping a chip changes the chunk", store.activeSession.plannedMin === 10);
+
+  // Chunk boundary → checkpoint message with actions. Backdate the start.
+  store.activeSession.startedAt = Date.now() - 11 * 60000;
+  store.activeSession.activityCount = 1; // the worker would have counted the assignment tab loading
+  await window.eval("restoreClock()");
+  await sleep(300);
+  const cp = [...window.document.querySelectorAll("#work-messages .msg.k-checkpoint")];
+  check("checkpoint posted at chunk boundary", cp.length === 1 && cp[0].querySelectorAll(".msg-actions button").length >= 2, cp[0]?.textContent.slice(0, 60));
+  check("no paper mode (a tab was opened → activity)", store.activeSession.mode !== "paper" || store.activeSession.activityCount === 0);
+  const firstBtn = cp[0]?.querySelector(".msg-actions button");
+  firstBtn?.click(); // "step done ✓"
+  await sleep(400);
+  check("checkpoint action marks the current step", Object.values(store.assignmentMeta || {}).some((m) => (m.steps || [])[0]?.done === true));
+
+  // Paper mode: a fresh boundary with zero tab activity and no doc
+  store.activeSession.activityCount = 0;
+  store.activeSession.paperChecked = false;
+  store.activeSession.checkpointFor = null;
+  store.activeSession.plannedMin = 5;
+  await window.eval("restoreClock()");
+  await sleep(300);
+  check("paper mode detected when nothing on screen moved", store.activeSession.mode === "paper" && $("work-chunk").textContent.includes("paper"));
 
   // check a step, add a step, run a chip
-  steps[0].querySelector("input").click();
-  await sleep(100);
+  // Re-query: the checkpoint action re-rendered the checklist.
+  const liveSteps = window.document.querySelectorAll("#steps .step");
+  liveSteps[1].querySelector("input").click();
+  await sleep(250);
   const meta = store.assignmentMeta || {};
   const saved = Object.values(meta).find((m) => Array.isArray(m.steps));
-  check("step state saved to meta", Boolean(saved && saved.steps[0].done));
+  check("step state saved to meta", Boolean(saved && saved.steps[1].done));
   $("step-input").value = "my own step";
   $("step-input").dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   await sleep(100);
-  check("user step added", window.document.querySelectorAll("#steps .step").length === steps.length + 1);
+  check("user step added", window.document.querySelectorAll("#steps .step").length === liveSteps.length + 1);
   window.document.querySelector('#work-chips [data-cmd="explain"]').click();
   await sleep(300);
   check("explain chip posts a message", window.document.querySelectorAll("#work-messages .msg").length > msgs.length);
@@ -144,6 +180,17 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   check("next card offered", !$("done-next").classList.contains("hidden"));
   $("done-close").click();
   check("done for now → list", visible("list"));
+
+  // Worker-detected completion (portal flip) while a new session runs → done view
+  window.document.querySelectorAll("#today-list .card")[0].querySelector(".start").click();
+  await sleep(600);
+  const runningId = store.activeSession?.assignmentId;
+  store.activeSession = null; // the worker's endSession clears it before writing pendingDone
+  await chrome.storage.local.set({ pendingDone: { assignmentId: runningId, title: "x", reason: "portal", record: { endedBy: "portal", actualMin: 7, plannedMin: 10 } } });
+  await sleep(300);
+  check("worker-ended session → done view", visible("done") && $("done-label").textContent.includes("myPoly"), $("done-label").textContent);
+  check("pendingDone consumed", !store.pendingDone);
+  $("done-close").click();
 
   // more view
   $("more-btn").click();

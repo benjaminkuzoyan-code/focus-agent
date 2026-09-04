@@ -21,6 +21,8 @@ importScripts(
 );
 
 const CHECKIN_ALARM = "fa-checkin";
+const DETECT_ALARM = "fa-detect";       // completion detection, every minute during a session
+const DOC_STALE_MS = 8 * 60 * 1000;     // a doc untouched this long → "looks finished?"
 const COMMITMENT_ALARM = "fa-commitments";
 const NUDGE_COOLDOWN_MS = 2 * 60 * 1000; // at most one negotiation per 2 min
 
@@ -155,12 +157,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         chrome.alarms.create(CHECKIN_ALARM, {
           periodInMinutes: message.checkinMin || settings.checkinMin,
         });
+        chrome.alarms.create(DETECT_ALARM, { periodInMinutes: 1 });
+        detectTick = 0;
         sendResponse({ ok: true });
         break;
       }
 
       case "SESSION_ENDED":
         chrome.alarms.clear(CHECKIN_ALARM);
+        chrome.alarms.clear(DETECT_ALARM);
         sendResponse({ ok: true });
         break;
 
@@ -180,19 +185,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
 
       case "START_SESSION_FROM_PAGE": {
-        // Coach bubble's "Start focus" — same flow the side panel uses.
+        // Coach bubble's "Start focus" — same Ramp proposal the panel uses.
         const a = message.assignment;
-        const plannedMin = Math.min(Math.max(a?.estMin || 25, 15), 50);
-        await FA.store.startSession(a, plannedMin);
-        const settings = await FA.store.getSettings();
-        chrome.alarms.create(CHECKIN_ALARM, { periodInMinutes: settings.checkinMin });
-        sendResponse({ ok: true, plannedMin });
+        const sessions = await FA.store.getSessions();
+        const { minutes, why } = FA.proposeChunk(sessions, a);
+        await FA.store.startSession(a, minutes, { chunkWhy: why });
+        chrome.alarms.create(CHECKIN_ALARM, { periodInMinutes: minutes });
+        chrome.alarms.create(DETECT_ALARM, { periodInMinutes: 1 });
+        detectTick = 0;
+        sendResponse({ ok: true, plannedMin: minutes });
         break;
       }
 
       case "END_SESSION_FROM_PAGE": {
         chrome.alarms.clear(CHECKIN_ALARM);
-        const record = await FA.store.endSession();
+        chrome.alarms.clear(DETECT_ALARM);
+        const record = await FA.store.endSession("user");
         sendResponse({ ok: true, record });
         break;
       }
@@ -261,6 +269,130 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === COMMITMENT_ALARM) {
     await fireDueCommitments();
   }
+
+  if (alarm.name === DETECT_ALARM) {
+    await detectCompletion();
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * The timer is the work: detect when the job is done
+ *
+ *   portal   the assignment vanished from the portal's PENDING list while a
+ *            portal tab answered → the student marked it complete or
+ *            submitted it. HIGH confidence → end the session, open "done".
+ *   doc      the assignment's Google Doc hasn't changed in 8 min after at
+ *            least one chunk → MEDIUM → the coach ASKS in the thread.
+ *   tab      the assignment tab was closed → LOW → the coach ASKS once.
+ *   steps    (panel) every checklist step checked → one-tap finish.
+ *
+ * Low/medium signals never end a session by themselves.
+ * ------------------------------------------------------------------ */
+let detectTick = 0;
+
+async function appendThread(assignmentId, text, kind) {
+  const meta = await FA.store.getMeta();
+  const thread = Array.isArray(meta[assignmentId]?.thread) ? meta[assignmentId].thread : [];
+  thread.push({ role: "coach", text: String(text).slice(0, 3000), kind, at: Date.now() });
+  await FA.store.patchAssignmentMeta(assignmentId, { thread: thread.slice(-40) });
+}
+
+async function detectCompletion() {
+  const session = await FA.store.getActiveSession();
+  if (!session || !session.assignmentId || session.assignmentId === "free") {
+    chrome.alarms.clear(DETECT_ALARM);
+    return;
+  }
+  detectTick++;
+  const elapsedMin = (Date.now() - session.startedAt) / 60000;
+
+  // --- portal: pending list no longer contains this assignment ---
+  const settings = await FA.store.getSettings();
+  if (settings.dataSource === "auto" && detectTick % 2 === 0) {
+    try {
+      const tabs = await chrome.tabs.query({ url: PORTAL_MATCHES });
+      for (const tab of tabs) {
+        let res;
+        try {
+          res = await chrome.tabs.sendMessage(tab.id, { type: "GET_ASSIGNMENTS" });
+        } catch {
+          continue; // no content script in this tab
+        }
+        if (!Array.isArray(res?.assignments)) continue;
+        await FA.store.cacheAssignments(res.assignments, "portal");
+        const stillPending = res.assignments.some((a) => a.id === session.assignmentId);
+        if (!stillPending) {
+          await completeSession(session, "portal");
+          return;
+        }
+        break; // one live tab is enough
+      }
+    } catch (e) {
+      console.log("[Focus Agent] portal poll skipped:", e.message);
+    }
+  }
+
+  // --- doc: unchanged for 8 min after the first chunk ---
+  if (detectTick % 3 === 0 && elapsedMin >= (session.chunkMin || session.plannedMin || 10) && !session.askedDoc) {
+    try {
+      const meta = await FA.store.getMeta();
+      const docUrl = meta[session.assignmentId]?.docUrl;
+      if (docUrl && (await FA.google.isConnected())) {
+        const d = await FA.google.readDoc(docUrl);
+        const sig = `${d.revisionId || ""}:${d.text.length}`;
+        const prev = session.docState;
+        if (!prev || prev.sig !== sig) {
+          await FA.store.updateActiveSession({ docState: { sig, at: Date.now() } });
+        } else if (Date.now() - prev.at >= DOC_STALE_MS && d.text.trim().length > 200) {
+          await FA.store.updateActiveSession({ askedDoc: true });
+          await appendThread(session.assignmentId, "Your doc hasn't changed in 8 minutes — looks finished? Hit done ✓ if it's turned in, or tell me what's left.", "ask-done");
+        }
+      }
+    } catch (e) {
+      console.log("[Focus Agent] doc poll skipped:", e.message);
+    }
+  }
+}
+
+/** End the session on a detected completion and hand the panel a "done" to show. */
+async function completeSession(session, reason) {
+  chrome.alarms.clear(CHECKIN_ALARM);
+  chrome.alarms.clear(DETECT_ALARM);
+  const meta = await FA.store.getMeta();
+  const steps = meta[session.assignmentId]?.steps || [];
+  const record = await FA.store.endSession(reason, { stepsDone: steps.filter((s) => s.done).length, stepsTotal: steps.length });
+  await FA.store.markDone(session.assignmentId);
+  const cache = await FA.store.getCachedAssignments();
+  const a = cache?.items?.find((x) => x.id === session.assignmentId) || { id: session.assignmentId, course: session.course, title: session.title };
+  await FA.store.addQuestEvent(a, a.estMin || record.actualMin || 0);
+  await chrome.storage.local.set({ pendingDone: { assignmentId: session.assignmentId, title: session.title, record, reason, at: Date.now() } });
+  chrome.notifications.create(`fa-done-${Date.now()}`, {
+    type: "basic",
+    iconUrl: "icons/icon128.png",
+    title: reason === "portal" ? "myPoly says it's done ✓" : "Done ✓",
+    message: `"${session.title}" — ${record.actualMin} min this sitting. Session closed.`,
+    priority: 1,
+  });
+}
+
+// Tab activity during a session (paper-mode detection) + closing the assignment tab.
+let lastActivityWrite = 0;
+async function noteActivity(tabId) {
+  if (Date.now() - lastActivityWrite < 10000) return;
+  const session = await FA.store.getActiveSession();
+  if (!session) return;
+  lastActivityWrite = Date.now();
+  await FA.store.updateActiveSession({ activityCount: (session.activityCount || 0) + 1 });
+}
+chrome.tabs.onActivated.addListener(({ tabId }) => noteActivity(tabId));
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "complete") noteActivity(tabId);
+});
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const session = await FA.store.getActiveSession();
+  if (!session || session.askedTab || !Array.isArray(session.tabs) || session.tabs[0] !== tabId) return;
+  await FA.store.updateActiveSession({ askedTab: true });
+  await appendThread(session.assignmentId, "You closed the assignment tab — done with it? Hit done ✓, or reopen it from the list.", "ask-done");
 });
 
 /** Commitment Receipts: "you told me 4pm" — the coach that remembers. */

@@ -366,7 +366,7 @@ async function executeSetupPlan(assignment, plan, resources) {
   for (const o of plan.opens || []) {
     const target = o.kind === "link" ? resources.links[o.i] : resources.topics[o.i];
     if (!target?.url) continue;
-    await openTab(target.url, false);
+    await rememberTab(await openTab(target.url, false));
     opened.push({ label: (o.kind === "topic" ? "📖 " : "🔗 ") + (target.name || target.text || target.url), why: o.why });
   }
   if (plan.doc && resources.googleConnected) {
@@ -476,7 +476,7 @@ async function smartStart(assignment, minOverride) {
   const plan = meta?.[assignment.id]?.setupPlan || new FA.MockCoach().setup(assignment, resources);
 
   await permission; // resolved or denied — either way we go on
-  if (assignment.url) await openTab(assignment.url, true);
+  if (assignment.url) await rememberTab(await openTab(assignment.url, true));
   let opened = [];
   try {
     opened = await executeSetupPlan(assignment, plan, resources);
@@ -518,13 +518,22 @@ async function smartStart(assignment, minOverride) {
  * Sessions (the clock)
  * ------------------------------------------------------------------ */
 async function startSession(assignment, minOverride) {
-  // Chunk = one sitting. Phase 3 replaces this clamp with the Ramp proposal
-  // from the student's measured focus history.
-  const plannedMin =
-    minOverride ??
-    (assignment?.estMin ? Math.min(Math.max(assignment.estMin, 15), 50) : settings.sessionMin || 25);
-  await FA.store.startSession(assignment, plannedMin);
-  chrome.runtime.sendMessage({ type: "SESSION_STARTED" }).catch(() => {});
+  // Ramp: this sitting's length comes from the student's own history (see
+  // FA.proposeChunk), never from the size of the assignment. A minOverride
+  // (2-min micro-start, a triage block) wins when given.
+  const sessions = await FA.store.getSessions();
+  const proposal = FA.proposeChunk(sessions, assignment);
+  const plannedMin = minOverride ?? proposal.minutes;
+  await FA.store.startSession(assignment, plannedMin, { chunkWhy: minOverride ? "" : proposal.why });
+  chrome.runtime.sendMessage({ type: "SESSION_STARTED", checkinMin: plannedMin }).catch(() => {});
+}
+
+/** Track the tabs Smart Start opened so the worker can notice them closing. */
+async function rememberTab(tab) {
+  if (!tab?.id) return;
+  const s = await FA.store.getActiveSession();
+  if (!s) return;
+  await FA.store.updateActiveSession({ tabs: [...(s.tabs || []), tab.id] });
 }
 
 /* ------------------------------------------------------------------ *
@@ -583,6 +592,8 @@ async function restoreClock() {
   } else {
     moodRow.classList.add("hidden");
   }
+  renderChunkChips(session);
+  let checkpointFired = false;
   const tick = () => {
     const elapsed = Math.floor((Date.now() - session.startedAt) / 1000);
     const mm = Math.floor(elapsed / 60);
@@ -593,12 +604,71 @@ async function restoreClock() {
     $("chunk-fill").style.width = pct.toFixed(1) + "%";
     $("chunk-fill").classList.toggle("over", elapsed > chunk);
     $("work-chunk").textContent =
-      elapsed <= chunk
-        ? `${Math.ceil((chunk - elapsed) / 60)} min left in this chunk`
-        : `past the ${session.plannedMin}-min chunk — finish the thought`;
+      session.mode === "paper"
+        ? "paper mode — check-ins by notification"
+        : elapsed <= chunk
+          ? `${Math.ceil((chunk - elapsed) / 60)} min left in this chunk`
+          : `past the ${session.plannedMin}-min chunk — finish the thought`;
+    // Chunk boundary → one checkpoint in the thread (per chunk length).
+    if (elapsed >= chunk && !checkpointFired && session.checkpointFor !== session.plannedMin) {
+      checkpointFired = true;
+      onChunkBoundary(session);
+    }
   };
   tick();
   timerInterval = setInterval(tick, 1000);
+}
+
+/** Ramp chips: 5 · 10 · 15 · 20 · 25, the proposal pre-selected, tap to change. */
+function renderChunkChips(session) {
+  const wrap = $("chunk-chips");
+  wrap.innerHTML = "";
+  for (const m of [5, 10, 15, 20, 25]) {
+    const b = document.createElement("button");
+    b.textContent = `${m}`;
+    b.title = `${m}-minute sitting`;
+    b.classList.toggle("active", m === session.plannedMin);
+    b.addEventListener("click", async () => {
+      await FA.store.updateActiveSession({ plannedMin: m, checkpointFor: null });
+      chrome.runtime.sendMessage({ type: "SESSION_STARTED", checkinMin: m }).catch(() => {});
+      await restoreClock();
+    });
+    wrap.appendChild(b);
+  }
+  $("chunk-why").textContent = session.chunkWhy || "";
+}
+
+/**
+ * The visible checkpoint S04 asked for: at the end of a chunk the coach says
+ * what got done and offers the next move. First boundary also decides paper
+ * mode (no doc, no tab activity → the work is off-screen).
+ */
+async function onChunkBoundary(session) {
+  await FA.store.updateActiveSession({ checkpointFor: session.plannedMin });
+  const cur = current?.steps.find((s) => !s.done);
+  const done = current?.steps.filter((s) => s.done).length || 0;
+  const total = current?.steps.length || 0;
+
+  if (session.mode !== "paper" && !session.paperChecked) {
+    const meta = await FA.store.getMeta();
+    const hasDoc = Boolean(meta?.[session.assignmentId]?.docUrl);
+    await FA.store.updateActiveSession({ paperChecked: true });
+    if (!hasDoc && (session.activityCount || 0) === 0) {
+      await FA.store.updateActiveSession({ mode: "paper" });
+      await pushCoach("Looks like this one's on paper — I'll keep the clock and check in by notification. Tap done ✓ when it's finished, or mark it complete in myPoly and I'll notice.", { kind: "paper" });
+      await restoreClock();
+      return;
+    }
+  }
+
+  const head = `${session.plannedMin} min in — ${total ? `${done}/${total} steps` : "checkpoint"}.`;
+  const body = cur ? `Is “${cur.text}” done?` : "Everything on the list is checked. Turned in?";
+  await pushCoach(`${head} ${body}`, {
+    kind: "checkpoint",
+    actions: cur
+      ? [{ label: "step done ✓", cmd: "step-done" }, { label: "+5 more", cmd: "more5" }, { label: "finish ✓", cmd: "finish" }]
+      : [{ label: "finish ✓", cmd: "finish" }, { label: "+5 more", cmd: "more5" }],
+  });
 }
 
 /* ---- checklist ---- */
@@ -638,7 +708,10 @@ function renderSteps() {
       renderSteps();
       await saveSteps();
       if (s.done && current.steps.every((x) => x.done)) {
-        await pushCoach("Every step is checked. Hit done ✓ when it's turned in — or add what's left.", { kind: "nudge" });
+        await pushCoach("Every step is checked. Turned in?", {
+          kind: "checkpoint",
+          actions: [{ label: "finish ✓", cmd: "finish" }, { label: "something's left", cmd: "add-step" }],
+        });
       }
     });
     const textEl = row.querySelector(".step-text");
@@ -726,6 +799,23 @@ function renderThread() {
     const el = document.createElement("div");
     el.className = "msg " + (m.role === "user" ? "me" : "coach") + (m.kind ? ` k-${m.kind}` : "");
     el.textContent = m.text;
+    if (m.actions?.length && !m.used) {
+      const row = document.createElement("div");
+      row.className = "msg-actions";
+      for (const a of m.actions) {
+        const b = document.createElement("button");
+        b.textContent = a.label;
+        if (/finish|done/.test(a.cmd)) b.className = "primary";
+        b.addEventListener("click", async () => {
+          m.used = true;
+          await saveThread();
+          renderThread();
+          runChip(a.cmd);
+        });
+        row.appendChild(b);
+      }
+      el.appendChild(row);
+    }
     if (m.links?.length) {
       const row = document.createElement("div");
       row.className = "msg-links";
@@ -902,6 +992,21 @@ async function runChip(cmd) {
       await restoreClock();
       return pushCoach("+5. Same step, no new tabs.", { kind: "nudge" });
     }
+    case "step-done": {
+      if (cur) {
+        cur.done = true;
+        cur.doneBy = "user";
+        cur.doneAt = Date.now();
+        renderSteps();
+        await saveSteps();
+      }
+      return;
+    }
+    case "finish":
+      return finishWork(true);
+    case "add-step":
+      $("step-input").focus();
+      return;
     case "dev-write":
       return sendWork(cur ? `[dev] Write this step for me, fully, ready to paste: "${cur.text}".` : "[dev] Write the next part for me, ready to paste.");
     case "dev-answer":
@@ -918,6 +1023,7 @@ async function finishWork(done) {
   const stepsTotal = current?.steps.length || 0;
 
   const record = await FA.store.endSession(done ? "user" : "stop", { stepsDone, stepsTotal });
+  await chrome.storage.local.remove("pendingDone").catch(() => {});
   chrome.runtime.sendMessage({ type: "SESSION_ENDED" }).catch(() => {});
 
   if (done && a) {
@@ -932,8 +1038,10 @@ async function finishWork(done) {
 /* ------------------------------------------------------------------ *
  * STATE C — done
  * ------------------------------------------------------------------ */
+const DONE_LABELS = { user: "done ✓", portal: "myPoly says it's done ✓", steps: "every step checked ✓", doc: "doc finished ✓", stop: "stopped — logged" };
+
 async function renderDone(a, record, done) {
-  $("done-label").textContent = done ? "done ✓" : "stopped — logged";
+  $("done-label").textContent = DONE_LABELS[record?.endedBy] || (done ? "done ✓" : "stopped — logged");
   $("done-title").textContent = a?.title || "Focus session";
   const spent = record?.actualMin || 0;
   const guess = a?.estMin;
@@ -1335,17 +1443,32 @@ $("google-btn").addEventListener("click", async () => {
   renderGoogleChip();
 });
 
-// The selection toolbar (on pages) appends to the assignment's thread via
-// the worker; pick that up live instead of waiting for a re-open.
+// The selection toolbar (on pages) and the worker's detectors append to the
+// assignment's thread; pick that up live instead of waiting for a re-open.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !changes.assignmentMeta || !current) return;
-  const m = changes.assignmentMeta.newValue?.[current.assignment.id];
-  const thread = Array.isArray(m?.thread) ? m.thread : null;
-  if (thread && thread.length !== current.thread.length) {
-    current.thread = thread;
-    renderThread();
+  if (area !== "local") return;
+  if (changes.assignmentMeta && current) {
+    const m = changes.assignmentMeta.newValue?.[current.assignment.id];
+    const thread = Array.isArray(m?.thread) ? m.thread : null;
+    if (thread && thread.length !== current.thread.length) {
+      current.thread = thread;
+      renderThread();
+    }
   }
+  if (changes.pendingDone?.newValue) showPendingDone(changes.pendingDone.newValue);
 });
+
+/** The worker detected completion (portal flip) and closed the session. */
+async function showPendingDone(pd) {
+  if (!pd) return;
+  clearInterval(timerInterval);
+  timerInterval = null;
+  await chrome.storage.local.remove("pendingDone");
+  await refreshAll();
+  const a = assignments.find((x) => x.id === pd.assignmentId) || { id: pd.assignmentId, title: pd.title, estMin: pd.record?.plannedMin };
+  await renderDone(a, pd.record, true);
+  showView("done");
+}
 
 /* ------------------------------------------------------------------ *
  * Boot
@@ -1374,6 +1497,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
     await chrome.storage.local.remove("panelOpenTab");
     if (panelOpenTab === "more") showView("more");
   }
+
+  // The worker finished a session while the panel was closed.
+  const { pendingDone } = await chrome.storage.local.get("pendingDone");
+  if (pendingDone) return showPendingDone(pendingDone);
 
   // A session is already running → land in the work view.
   const s = await FA.store.getActiveSession();

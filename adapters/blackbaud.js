@@ -93,8 +93,21 @@
   // Cached per page load: who the student is + which school year is current.
   let profilePromise = null;
 
+  /**
+   * ONE-TAP "MARK COMPLETE" — SPIKE PENDING (2026-09-03).
+   * Blackbaud has no documented student-side endpoint for the checkbox that
+   * flips assignment_status to 1. To wire this up: in myPoly, open DevTools →
+   * Network, tick an assignment complete by hand, and copy the request (URL,
+   * method, body, headers) into this function. Until then it throws, and the
+   * product falls back to detecting the flip via the status poll.
+   */
+  async function markComplete(assignmentIndexId) {
+    throw new Error(`markComplete(${assignmentIndexId}) not wired yet — capture the portal's own request first (see adapters/blackbaud.js)`);
+  }
+
   FA.adapters = FA.adapters || {};
   FA.adapters.blackbaud = {
+    markComplete,
     /** True when the current page is a Blackbaud portal. */
     matches(host) {
       return /myschoolapp\.com$|blackbaud\.com$/.test(host);
