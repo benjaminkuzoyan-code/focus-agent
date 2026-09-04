@@ -272,14 +272,63 @@ def build_chat(p):
             f"Their checklist for it (done flags are real): {json.dumps(focus.get('steps', []))}\n"
             f"Minutes into this work session: {focus.get('elapsedMin', 0)}\n\n"
         )
+    files = p.get("files") or []
+    files_block = ""
+    if files:
+        parts = []
+        for f in files[:8]:
+            hl = f.get("highlights") or []
+            hl_txt = ""
+            if hl:
+                hl_txt = "\nThe student's highlights + notes on it:\n" + "\n".join(
+                    f"  - \"{str(h.get('quote',''))[:200]}\"" + (f" — note: {str(h.get('note',''))[:300]}" if h.get("note") else "")
+                    for h in hl[:30]
+                )
+            parts.append(
+                f"### {f.get('title','file')} ({f.get('kind','file')}{', truncated' if f.get('truncated') else ''})\n"
+                f"{str(f.get('text',''))[:14000]}{hl_txt}"
+            )
+        files_block = (
+            "FILES ATTACHED TO THIS ASSIGNMENT (you can see these whatever tab the student is on):\n\n"
+            + "\n\n".join(parts) + "\n\n"
+        )
+    dev = bool(p.get("devMode"))
+    target = p.get("docTarget") or None
+    can_write = dev and target and bool(p.get("googleConnected"))
+    if can_write:
+        write_block = (
+            "DEVELOPER MODE — YOU CAN WRITE INTO THE STUDENT'S GOOGLE DOC. When they ask "
+            "you to write, add, fix or format something IN the doc, do it: end your reply "
+            "with a fenced block\n```docops\n{\"ops\": [...], \"summary\": \"<≤15 words>\"}\n```\n"
+            "Allowed ops: {\"type\":\"append\",\"text\"} · {\"type\":\"replaceAll\",\"find\",\"replace\"} · "
+            "{\"type\":\"insertAfter\",\"paragraph\":<i>,\"text\"} · {\"type\":\"replaceParagraph\",\"paragraph\":<i>,\"text\"} · "
+            "{\"type\":\"deleteParagraph\",\"paragraph\":<i>} · {\"type\":\"setStyle\",\"paragraph\":<i>,\"style\":\"HEADING_2\"} · "
+            "{\"type\":\"replaceBody\",\"text\"} (only for a full rewrite). Paragraph indexes count from 0 in the "
+            "attached doc's text, one per line. Write finished prose, never placeholders. Say what you did "
+            "in one line; the block does the writing. Never claim you can't write into the doc.\n\n"
+        )
+    elif dev:
+        write_block = (
+            "DEVELOPER MODE, but no doc is attached to this assignment"
+            + ("" if p.get("googleConnected") else " and Google isn't connected (⚙ → connect G)")
+            + ". If asked to write into a doc, tell the student to open it in a tab and tap '+ this tab', then ask again.\n\n"
+        )
+    else:
+        write_block = (
+            "You do not write into the student's documents (tutor, not ghostwriter). If asked, "
+            "say what you'd put there and point them at the 'format my doc' chip for formatting.\n\n"
+        )
     return (
         f"{COACH_IDENTITY}\n\n"
         f"{_policy(p)}\n\n"
         "What you can see (be accurate if asked): the student's assignments, grades "
-        "and schedule from their school portal; the assignment they're working on "
-        "and its checklist; and, if a Google Doc is open in their active tab, its "
-        "full text (below). Nothing else on their screen.\n\n"
+        "and schedule from their school portal; the assignment they're working on, its "
+        "checklist, and every FILE ATTACHED to it (readings, PDFs, their doc — with their "
+        "highlights and notes); and, if a Google Doc is open in their active tab, its text. "
+        "Attached files stay visible when they switch tabs. Nothing else on their screen.\n\n"
+        f"{write_block}"
         f"{focus_block}"
+        f"{files_block}"
         f"{_context_block(p)}"
         f"{doc_block}"
         f"The student's current assignments: {json.dumps(p.get('assignments', []))}\n"

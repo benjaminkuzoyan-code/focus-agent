@@ -98,6 +98,20 @@
       </div>
       <div id="mood-response" class="mood-response hidden"></div>
 
+      <!-- Files the coach can see for THIS assignment — the memory that
+           survives switching tabs. Drop files here, or add the current tab. -->
+      <div id="files" class="files">
+        <div class="files-head">
+          <span>files the coach can see</span>
+          <span class="files-actions">
+            <button id="files-add-tab" class="mini-btn" title="Attach the page/doc/PDF in the active tab">+ this tab</button>
+            <button id="files-add-local" class="mini-btn" title="Attach a file from your computer (PDF, text)">+ file</button>
+          </span>
+        </div>
+        <div id="files-list" class="files-list"></div>
+        <input type="file" id="files-input" accept=".pdf,.txt,.md,.csv,text/plain,application/pdf" multiple class="hidden" />
+      </div>
+
       <!-- The breakdown, as a checklist you can edit -->
       <div id="steps" class="steps"></div>
       <div class="step-add">
@@ -265,6 +279,7 @@
   <script src="../lib/priority.js"></script>
   <script src="../lib/snapshot.js"></script>
   <script src="../lib/docops.js"></script>
+  <script src="../lib/pdftext.js"></script>
   <script src="../lib/google.js"></script>
   <script src="../lib/forecast.js"></script>
   <script src="../lib/xp.js"></script>

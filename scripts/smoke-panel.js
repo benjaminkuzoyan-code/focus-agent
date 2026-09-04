@@ -225,6 +225,23 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   check("stop recorded as endedBy stop", store.sessions.some((s) => s.endedBy === "stop"));
   $("done-close").click();
 
+  // Files box: attach a URL (no tab open → recorded with an honest error), persists per assignment
+  window.document.querySelectorAll("#today-list .card")[0].querySelector(".start").click();
+  await sleep(600);
+  await window.eval("attachUrl('https://reading.example.edu/ch3', 'Chapter 3')");
+  await sleep(200);
+  const fchips = window.document.querySelectorAll("#files-list .file-chip");
+  check("files box shows the attached reading", fchips.length >= 1 && fchips[0].textContent.includes("Chapter 3"));
+  check("attached file persisted in assignment meta", Object.values(store.assignmentMeta).some((m) => (m.files || []).some((f) => f.url === "https://reading.example.edu/ch3")));
+  const dup = await window.eval("attachUrl('https://reading.example.edu/ch3#frag', 'Chapter 3')");
+  check("same URL not attached twice", dup === null && window.document.querySelectorAll("#files-list .file-chip").length === fchips.length);
+  // docops in a reply: student build strips the block and never writes
+  const out = await window.eval("applyDocOpsFromReply('Done.\\n```docops\\n{\"ops\":[{\"type\":\"append\",\"text\":\"x\"}],\"summary\":\"added x\"}\\n```', {id:null}, false)");
+  check("student build: docops block stripped, nothing written", out.trim() === "Done." || /no doc/.test(out));
+  $("work-stop").click();
+  await sleep(300);
+  $("done-close").click();
+
   // time budget → inline plan
   window.document.querySelector('.time-chip[data-min="60"]').click();
   await sleep(300);

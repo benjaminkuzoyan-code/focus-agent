@@ -678,3 +678,20 @@ body:not(.dev) .dev { display: none !important; }
 .dock .tab { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 14px; }
 .dock .tab small { font-size: 9.5px; letter-spacing: 0.3px; color: var(--muted); }
 .dock .tab.active small { color: var(--ink); }
+
+/* ---------- files box (per-assignment memory) ---------- */
+.files { margin: 2px 0 10px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--glass); border: 1px dashed var(--edge); transition: border-color 0.2s, background 0.2s; }
+.files.drop { border-color: var(--accent); background: rgba(129, 140, 248, 0.1); }
+.files-head { display: flex; justify-content: space-between; align-items: center; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: var(--muted); font-weight: 800; }
+.files-actions { display: flex; gap: 4px; }
+.mini-btn { background: var(--glass-strong); border: none; color: var(--ink); border-radius: 999px; padding: 3px 9px; font-size: 11px; cursor: pointer; letter-spacing: 0; text-transform: none; font-weight: 500; }
+.mini-btn:hover { background: rgba(129, 140, 248, 0.25); }
+.files-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.files-list:empty::after { content: "nothing attached — drop a file or add the tab you're reading"; font-size: 11.5px; color: var(--muted); }
+.file-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; background: var(--glass-strong); border-radius: 999px; padding: 3px 6px 3px 9px; font-size: 11.5px; cursor: default; }
+.file-chip .f-title { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-chip .f-size { color: var(--muted); font-size: 10.5px; }
+.file-chip .f-x { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 0 3px; }
+.file-chip .f-x:hover { color: var(--red); }
+.file-chip.loading { opacity: 0.6; }
+.file-chip.error { border: 1px solid rgba(251, 113, 133, 0.4); }

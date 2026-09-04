@@ -553,6 +553,19 @@ async function smartStart(assignment, minOverride) {
     console.warn("[Focus Agent] setup execution failed (non-fatal):", e.message);
   }
 
+  // 3b. The coach files what it opened, so the reading is in memory for this
+  //     assignment no matter which tab is active later.
+  try {
+    const meta2 = await FA.store.getMeta();
+    if (meta2?.[assignment.id]?.docUrl) await attachUrl(meta2[assignment.id].docUrl, "your doc", { silent: true });
+    for (const o of plan.opens || []) {
+      const target = o.kind === "link" ? resources.links[o.i] : resources.topics[o.i];
+      if (target?.url) await attachUrl(target.url, target.name || target.text || "", { silent: true });
+    }
+  } catch (e) {
+    console.warn("[Focus Agent] auto-attach skipped:", e.message);
+  }
+
   // 4. The coach speaks first: the setup summary, then a question if it
   //    isn't sure what the assignment wants.
   await pushCoach(setupMessage(plan, opened), { kind: "setup" });
@@ -620,8 +633,10 @@ async function enterWork(assignment) {
     assignment,
     steps: Array.isArray(m.steps) ? m.steps : [],
     thread: Array.isArray(m.thread) ? m.thread : [],
+    files: Array.isArray(m.files) ? m.files : [],
     awaitingDraft: false,
   };
+  renderFiles();
 
   $("work-title").textContent = assignment.title;
   $("work-meta").textContent = [assignment.course, dueLabel(assignment), assignment.estMin ? `~${assignment.estMin} min` : ""].filter(Boolean).join(" · ");
@@ -742,6 +757,182 @@ async function onChunkBoundary(session) {
     actions: cur
       ? [{ label: "step done ✓", cmd: "step-done" }, { label: "+5 more", cmd: "more5" }, { label: "finish ✓", cmd: "finish" }]
       : [{ label: "finish ✓", cmd: "finish" }, { label: "+5 more", cmd: "more5" }],
+  });
+}
+
+/* ---- files: the memory that survives switching tabs ----
+ * Each file: {id, kind: "gdoc"|"pdf"|"page"|"local", title, url, text, chars, addedAt, error}
+ * `text` is cached here so the coach sees the reading whichever tab is active.
+ * Capped per file and in total when sent to the brain (see filesForBrain). */
+const FILE_TEXT_CAP = 60000;
+
+async function saveFiles() {
+  if (!current) return;
+  await FA.store.patchAssignmentMeta(current.assignment.id, { files: current.files });
+}
+
+function renderFiles() {
+  const list = $("files-list");
+  list.innerHTML = "";
+  if (!current) return;
+  for (const f of current.files) {
+    const chip = document.createElement("span");
+    chip.className = "file-chip" + (f.loading ? " loading" : "") + (f.error ? " error" : "");
+    const icon = f.kind === "gdoc" ? "📄" : f.kind === "pdf" ? "📕" : f.kind === "local" ? "📎" : "🌐";
+    chip.innerHTML = `<span>${icon}</span><span class="f-title"></span><span class="f-size"></span><button class="f-x" title="detach">✕</button>`;
+    chip.querySelector(".f-title").textContent = f.title || f.url || "file";
+    chip.querySelector(".f-size").textContent = f.loading ? "reading…" : f.error ? "!" : f.chars ? `${Math.round(f.chars / 1000)}k` : "";
+    chip.title = f.error ? `Couldn't read: ${f.error}` : f.url || f.title;
+    if (f.url && !f.url.startsWith("local:")) {
+      chip.querySelector(".f-title").style.cursor = "pointer";
+      chip.querySelector(".f-title").addEventListener("click", () => openTab(f.url, true));
+    }
+    chip.querySelector(".f-x").addEventListener("click", async () => {
+      current.files = current.files.filter((x) => x.id !== f.id);
+      renderFiles();
+      await saveFiles();
+    });
+    list.appendChild(chip);
+  }
+}
+
+/** Read text for a file entry, by kind. Mutates + saves it. */
+async function loadFileText(f) {
+  f.loading = true;
+  f.error = null;
+  renderFiles();
+  try {
+    let text = "";
+    if (f.kind === "gdoc") {
+      const d = await FA.google.readDoc(f.url);
+      text = d.text;
+      if (d.title && !f.title) f.title = d.title;
+    } else if (f.kind === "pdf") {
+      const r = await FA.pdfText.fromUrl(f.url);
+      text = r.text;
+      f.pages = r.pages;
+    } else if (f.kind === "page") {
+      const [tab] = await chrome.tabs.query({ url: f.url.split("#")[0] + "*" });
+      if (!tab?.id) throw new Error("open the page in a tab first");
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => (document.querySelector("article, main, [role=main]") || document.body).innerText,
+      });
+      text = res?.result || "";
+    }
+    f.text = String(text || "").slice(0, FILE_TEXT_CAP);
+    f.chars = f.text.length;
+    if (!f.chars) f.error = "no text found";
+  } catch (e) {
+    f.error = e.message;
+  }
+  f.loading = false;
+  renderFiles();
+  await saveFiles();
+}
+
+/** Attach a URL (doc / pdf / page) to the current assignment, deduped. */
+async function attachUrl(url, title = "", { silent = false } = {}) {
+  if (!current || !url) return null;
+  let kind = "page";
+  let clean = url.split("#")[0];
+  const pdf = pdfSourceFor(url);
+  if (/docs\.google\.com\/document\/d\//.test(url)) {
+    kind = "gdoc";
+    clean = "https://docs.google.com/document/d/" + FA.google.docIdFrom(url) + "/edit";
+  } else if (pdf) {
+    kind = "pdf";
+    clean = pdf;
+  } else if (url.includes("/viewer/pdfjs/")) {
+    kind = "pdf";
+    clean = new URL(url).searchParams.get("file") || url;
+  }
+  if (current.files.some((f) => f.url === clean)) return null;
+  const f = { id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), kind, title: title || "", url: clean, text: "", chars: 0, addedAt: Date.now() };
+  current.files.push(f);
+  renderFiles();
+  await saveFiles();
+  await loadFileText(f);
+  if (!silent) await pushCoach(f.error ? `Attached “${f.title || clean}” but couldn't read it: ${f.error}` : `📎 I can see “${f.title || clean}” now (${Math.round(f.chars / 1000)}k chars) — for this assignment, whatever tab you're on.`, { kind: "nudge" });
+  return f;
+}
+
+async function attachActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url || /^chrome:/.test(tab.url)) return pushCoach("Switch to the tab with the reading, then tap + this tab.");
+  if (tab.url.startsWith(chrome.runtime.getURL("")) && !tab.url.includes("/viewer/pdfjs/")) return;
+  return attachUrl(tab.url, (tab.title || "").replace(/ - Google (Docs|Drive)$/, ""));
+}
+
+async function attachLocalFiles(fileList) {
+  for (const file of fileList) {
+    if (!current) return;
+    const f = { id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), kind: "local", title: file.name, url: "local:" + file.name, text: "", chars: 0, addedAt: Date.now(), loading: true };
+    current.files.push(f);
+    renderFiles();
+    try {
+      if (/pdf$/i.test(file.name) || file.type === "application/pdf") {
+        const r = await FA.pdfText.fromData(await file.arrayBuffer());
+        f.text = r.text.slice(0, FILE_TEXT_CAP);
+        f.pages = r.pages;
+      } else {
+        f.text = (await file.text()).slice(0, FILE_TEXT_CAP);
+      }
+      f.chars = f.text.length;
+      if (!f.chars) f.error = "no text found (scanned PDF? try a photo instead)";
+    } catch (e) {
+      f.error = e.message;
+    }
+    f.loading = false;
+    renderFiles();
+    await saveFiles();
+    await pushCoach(f.error ? `Attached “${file.name}” but couldn't read it: ${f.error}` : `📎 I can see “${file.name}” now (${Math.round(f.chars / 1000)}k chars).`, { kind: "nudge" });
+  }
+}
+
+/** What the brain gets: every attached file's text (capped) + the student's highlights on them. */
+async function filesForBrain() {
+  if (!current?.files.length) return [];
+  const PER = 14000;
+  let budget = 48000;
+  const out = [];
+  const all = await chrome.storage.local.get(null);
+  for (const f of current.files) {
+    if (!f.text) continue;
+    const slice = f.text.slice(0, Math.min(PER, budget));
+    budget -= slice.length;
+    let highlights = [];
+    try {
+      const u = new URL(f.url);
+      const key = f.kind === "pdf" ? "fa-hl:" + f.url : "fa-hl:" + u.origin + u.pathname;
+      highlights = (all[key] || []).map((h) => ({ quote: h.sel?.exact?.slice(0, 200), note: h.note || "" })).slice(0, 30);
+    } catch {
+      /* local file */
+    }
+    out.push({ title: f.title || f.url, kind: f.kind, text: slice, truncated: f.text.length > slice.length, highlights });
+    if (budget <= 0) break;
+  }
+  return out;
+}
+
+$("files-add-tab").addEventListener("click", attachActiveTab);
+$("files-add-local").addEventListener("click", () => $("files-input").click());
+$("files-input").addEventListener("change", async (e) => {
+  const files = [...(e.target.files || [])];
+  e.target.value = "";
+  await attachLocalFiles(files);
+});
+{
+  const box = $("files");
+  ["dragenter", "dragover"].forEach((ev) => box.addEventListener(ev, (e) => { e.preventDefault(); box.classList.add("drop"); }));
+  ["dragleave", "drop"].forEach((ev) => box.addEventListener(ev, () => box.classList.remove("drop")));
+  box.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    if (!current) return;
+    const files = [...(e.dataTransfer?.files || [])];
+    if (files.length) return attachLocalFiles(files);
+    const url = e.dataTransfer?.getData("text/uri-list") || e.dataTransfer?.getData("text/plain");
+    if (url && /^https?:/.test(url)) return attachUrl(url.trim());
   });
 }
 
@@ -962,6 +1153,9 @@ async function sendWork(text) {
   const week = sessions.filter((s) => s.endedAt > weekAgo);
   const { doc, note } = await readOpenDoc();
   const session = await FA.store.getActiveSession();
+  const files = await filesForBrain();
+  const target = await docFor(current.assignment);
+  const googleConnected = await FA.google.isConnected().catch(() => false);
 
   const context = {
     ranked,
@@ -969,6 +1163,10 @@ async function sendWork(text) {
     mode: settings.mode || "tutor",
     doc,
     docNote: note,
+    files,
+    devMode: Boolean(settings.devMode),
+    googleConnected,
+    docTarget: target.id ? { id: target.id, url: target.url } : null,
     focus: {
       assignment: current.assignment,
       steps: current.steps,
@@ -983,7 +1181,33 @@ async function sendWork(text) {
 
   const { reply } = await Promise.resolve(FA.coach.chat(current.thread, context));
   $("work-typing")?.remove();
-  await pushCoach(reply);
+  await pushCoach(await applyDocOpsFromReply(reply, target, googleConnected));
+}
+
+/**
+ * Developer mode: the coach may answer with a fenced ```docops JSON block —
+ * {"ops":[...], "summary": "..."} — meaning "write this into the doc". Apply
+ * it and replace the block with what happened. Never in the student build.
+ */
+async function applyDocOpsFromReply(reply, target, googleConnected) {
+  const m = String(reply || "").match(/```docops\s*([\s\S]*?)```/);
+  if (!m) return reply;
+  const rest = reply.replace(m[0], "").trim();
+  if (!settings.devMode) return rest || reply;
+  let block;
+  try {
+    block = JSON.parse(m[1]);
+  } catch {
+    return `${rest}\n\n(the coach tried to edit the doc but sent malformed ops)`;
+  }
+  if (!target?.id) return `${rest}\n\n(the coach wanted to write into your doc, but this assignment has no doc yet — open one in a tab and tap + this tab)`;
+  if (!googleConnected) return `${rest}\n\n(the coach wanted to write into your doc — connect Google first: ⚙ → connect G)`;
+  try {
+    const r = await FA.google.editDoc(target.id, block.ops || []);
+    return `${rest}\n\n✍️ ${block.summary || "wrote into your doc"} (${r.applied} change${r.applied === 1 ? "" : "s"})`;
+  } catch (e) {
+    return `${rest}\n\n(couldn't write into the doc: ${e.message})`;
+  }
 }
 
 /** 💡 Explain → a coach message. */
