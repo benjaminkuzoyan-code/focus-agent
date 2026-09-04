@@ -23,8 +23,9 @@
     </div>
     <div class="header-right">
       <span id="streak-badge" class="chip" title="Days in a row with a focus session">🔥 0</span>
+      <button id="highlight-btn" class="chip chip-btn" title="Turn on highlight → annotate · summarize · ask for the page you're on (PDFs reopen in the highlightable viewer)">🖍</button>
       <button id="refresh-btn" class="chip chip-btn" title="Re-read assignments from your portal">↻</button>
-      <button id="more-btn" class="chip chip-btn" title="Classes, stats, settings">▸</button>
+      <button id="more-btn" class="chip chip-btn" title="Settings">⚙</button>
     </div>
   </header>
 
@@ -149,8 +150,8 @@
       <button id="done-close" class="ghost wide">done for now</button>
     </section>
 
-    <!-- ============ ▸ MORE ============ -->
-    <section id="view-more" class="view">
+    <!-- ============ CLASSES ============ -->
+    <section id="view-classes" class="view">
       <div class="section-title">your classes</div>
       <div id="class-list" class="list"></div>
       <div class="section-title">this week</div>
@@ -164,8 +165,10 @@
           <button id="phone-copy" class="hidden">Copy feed link</button>
         </div>
       </div>
+    </section>
 
-      <div class="section-title">stats</div>
+    <!-- ============ YOU ============ -->
+    <section id="view-you" class="view">
       <div class="stat-row" id="stat-cards"></div>
       <div id="level-box" class="level-box glass"></div>
       <div class="chart-box glass"><div class="chart-title">focused minutes — last 14 days</div><div id="chart-daily"></div></div>
@@ -196,7 +199,10 @@
         <input type="text" id="chat-input" placeholder="talk to your coach…" autocomplete="off" />
         <button id="chat-send" class="chat-send" title="send">➤</button>
       </div>
+    </section>
 
+    <!-- ============ ⚙ SETTINGS ============ -->
+    <section id="view-more" class="view">
       <div class="section-title">settings</div>
       <div class="settings">
         <div class="settings-row">
@@ -204,7 +210,7 @@
           <span id="brain-badge" class="chip">⚙️ rules</span>
         </div>
         <div class="settings-row">
-          <span>Google (Docs + Calendar)</span>
+          <span>Google (Docs + Calendar) <span id="google-note" class="muted small"></span></span>
           <button id="google-btn" class="chip chip-btn">G</button>
         </div>
         <div class="settings-row">
@@ -222,7 +228,7 @@
           </select>
         </div>
         <div class="settings-row">
-          <span>draw on this page</span>
+          <span>draw on this page <span class="muted small">(pen/highlighter canvas)</span></span>
           <button id="annotate-btn" class="chip chip-btn" title="Highlighter/pen overlay on the current tab">✏️</button>
         </div>
         <div class="settings-row">
@@ -238,8 +244,17 @@
           <input type="checkbox" id="auto-done-toggle" />
         </div>
       </div>
+      <div class="section-title">how highlighting works</div>
+      <p class="muted small">Select text on a web page or PDF that Smart Start opened → 🖍 annotate · ≡ summarize · ? ask appear above it. On any other page, tap 🖍 in the header first. PDFs open in our own viewer (Chrome's built-in one can't be highlighted). Google Docs draw on a canvas, so selection there is invisible to extensions — use <b>check my draft</b> in the work view instead; the coach reads the whole doc and can leave comments on it.</p>
     </section>
   </main>
+
+  <!-- Three buttons. Settings live behind ⚙ in the header. -->
+  <nav class="dock">
+    <button class="tab active" data-view="list" title="Today"><span>🏠</span><small>today</small></button>
+    <button class="tab" data-view="you" title="Your stats, streak, XP"><span>📈</span><small>you</small></button>
+    <button class="tab" data-view="classes" title="Classes, grades, schedule"><span>🎓</span><small>classes</small></button>
+  </nav>
 
   <!-- Load order matters: schema → adapters → libs → panel logic -->
   <script src="../adapters/schema.js"></script>

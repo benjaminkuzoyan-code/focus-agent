@@ -509,7 +509,7 @@ select {
 @media (prefers-reduced-motion: no-preference) {
   .view.active { animation: viewIn 0.32s cubic-bezier(0.2, 0.9, 0.3, 1); }
 }
-.views { padding-bottom: 24px; } /* no dock any more */
+.views { padding-bottom: 86px; } /* clears the dock */
 
 /* ---------- list ---------- */
 .resume-banner {
@@ -673,3 +673,8 @@ body:not(.dev) .dev { display: none !important; }
 
 .done-stats { white-space: pre-line; }
 .msg.k-dev { border-color: rgba(252, 211, 77, 0.45); }
+
+/* ---------- 3-button dock (v0.7.4) ---------- */
+.dock .tab { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 14px; }
+.dock .tab small { font-size: 9.5px; letter-spacing: 0.3px; color: var(--muted); }
+.dock .tab.active small { color: var(--ink); }

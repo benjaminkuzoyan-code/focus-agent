@@ -51,10 +51,59 @@ const PORTAL_URL_PATTERNS = [
 function showView(name) {
   view = name;
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
-  $("more-btn").textContent = name === "more" ? "◂" : "▸";
-  $("more-btn").title = name === "more" ? "Back" : "Classes, stats, settings";
+  document.querySelectorAll(".dock .tab").forEach((b) => b.classList.toggle("active", b.dataset.view === name || (name === "work" && b.dataset.view === "list") || (name === "done" && b.dataset.view === "list")));
+  $("more-btn").textContent = name === "more" ? "◂" : "⚙";
+  $("more-btn").title = name === "more" ? "Back" : "Settings";
   window.scrollTo({ top: 0 });
 }
+
+/** The dock: today (list, or the running session), you, classes. */
+document.querySelectorAll(".dock .tab").forEach((b) =>
+  b.addEventListener("click", async () => {
+    if (b.dataset.view === "list") {
+      const s = await FA.store.getActiveSession();
+      showView(s && current ? "work" : "list");
+    } else showView(b.dataset.view);
+  })
+);
+
+/**
+ * 🖍 in the header: make the page you're on highlightable right now.
+ * activeTab grants us this one tab on the click, so it works on any site
+ * without the permission prompt. PDFs in Chrome's built-in viewer can't be
+ * injected into — they reopen in our pdf.js viewer instead.
+ */
+$("highlight-btn").addEventListener("click", async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || !tab.url) return;
+  const btn = $("highlight-btn");
+  const flash = (txt) => {
+    btn.textContent = txt;
+    setTimeout(() => (btn.textContent = "🖍"), 2200);
+  };
+  if (/^chrome:|^chrome-extension:\/\/(?!.*viewer\/pdfjs)/.test(tab.url) && !tab.url.includes("/viewer/pdfjs/")) return flash("✕");
+  if (/docs\.google\.com\/document/.test(tab.url)) return flash("📄");
+  if (/\.pdf($|[?#])/i.test(new URL(tab.url).pathname) || tab.url.startsWith("file:")) {
+    if (!tab.url.includes("/viewer/pdfjs/")) {
+      await chrome.tabs.update(tab.id, { url: chrome.runtime.getURL("viewer/pdfjs/web/viewer.html") + "?file=" + encodeURIComponent(tab.url) });
+      return flash("↻");
+    }
+  }
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["annotate/selection-toolbar.js"] });
+    // Remember the site so it's on next time too (may prompt; fine if declined).
+    try {
+      const o = new URL(tab.url);
+      if (/^https?:$/.test(o.protocol)) chrome.permissions.request({ origins: [`${o.origin}/*`] }).catch(() => {});
+    } catch {
+      /* not an http(s) tab */
+    }
+    flash("✓");
+  } catch (e) {
+    console.warn("[Focus Agent] can't highlight here:", e.message);
+    flash("✕");
+  }
+});
 
 /* ------------------------------------------------------------------ *
  * Data loading
@@ -489,6 +538,11 @@ async function smartStart(assignment, minOverride) {
   // 4. The coach speaks first: the setup summary, then a question if it
   //    isn't sure what the assignment wants.
   await pushCoach(setupMessage(plan, opened), { kind: "setup" });
+  if (!settings.hintedHighlight) {
+    await FA.store.setSettings({ hintedHighlight: true });
+    settings.hintedHighlight = true;
+    await pushCoach("Tip: on the pages I opened, select any text → 🖍 annotate · ≡ summarize · ? ask pop up above it. Other page? Tap 🖍 in the header first. (Google Docs can't be highlighted — use check my draft.)", { kind: "nudge" });
+  }
   if ((plan.confidence ?? 1) < 0.6 && plan.missing?.length) {
     await pushCoach(`Before we go — ${plan.missing[0]}?`, { kind: "question" });
   }
@@ -1591,10 +1645,11 @@ $("annotate-btn").addEventListener("click", async () => {
 
 // G chip: connect / show Google status. Token lives in Chrome, not in us.
 async function renderGoogleChip() {
-  const on = await FA.google.isConnected();
+  const acct = await FA.google.account().catch(() => null);
   const chip = $("google-btn");
-  chip.textContent = on ? "G ✓ connected" : "connect G";
-  chip.title = on ? "Google connected (Docs + Calendar). Click to disconnect." : "Connect Google (Docs + Calendar)";
+  chip.textContent = acct ? "G ✓ connected" : "connect G";
+  chip.title = acct ? "Google connected (Docs + Calendar). Click to disconnect." : "Connect Google (Docs + Calendar)";
+  $("google-note").textContent = acct?.email ? acct.email : acct ? "Chrome account" : "";
 }
 $("google-btn").addEventListener("click", async () => {
   const chip = $("google-btn");
@@ -1606,7 +1661,9 @@ $("google-btn").addEventListener("click", async () => {
       await FA.google.connect();
     } catch (e) {
       console.warn("[Focus Agent] Google connect failed:", e.message);
-      const msg = /not signed in/i.test(e.message)
+      const msg = /disabled for this account/i.test(e.message)
+        ? "Your school account blocks this. Google's account picker should have opened so you can choose a personal Gmail — if it didn't, the web client isn't configured yet."
+        : /not signed in/i.test(e.message)
         ? "Chrome itself isn't signed in to a Google account. Click your profile icon (top-right of Chrome) → sign in, then try again."
         : /bad client id|invalid_client|OAuth2 not granted|manifest/i.test(e.message)
           ? `Google rejected the client id (${e.message}). Try again shortly.`

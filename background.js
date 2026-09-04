@@ -85,9 +85,39 @@ const COACH_METHODS = {
   askPassage: (p) => [p.quote, p.question, { title: p.title, url: p.url }],
 };
 
+// Right-click → "Highlight with Focus Agent" on any page or PDF link.
+function ensureContextMenu() {
+  try {
+    chrome.contextMenus.removeAll(() => {
+      chrome.contextMenus.create({ id: "fa-highlight-here", title: "Highlight with Focus Agent (annotate · summarize · ask)", contexts: ["page", "selection"] });
+      chrome.contextMenus.create({ id: "fa-open-pdf", title: "Open PDF in Focus Agent viewer", contexts: ["link"], targetUrlPatterns: ["*://*/*.pdf", "*://*/*.pdf?*", "*://*/*.PDF"] });
+    });
+  } catch (e) {
+    console.log("[Focus Agent] context menu:", e.message);
+  }
+}
+chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId === "fa-open-pdf" && info.linkUrl) {
+    chrome.tabs.create({ url: chrome.runtime.getURL("viewer/pdfjs/web/viewer.html") + "?file=" + encodeURIComponent(info.linkUrl) });
+    return;
+  }
+  if (info.menuItemId === "fa-highlight-here" && tab?.id) {
+    if (/\.pdf($|[?#])/i.test(tab.url || "") && !tab.url.includes("/viewer/pdfjs/")) {
+      chrome.tabs.update(tab.id, { url: chrome.runtime.getURL("viewer/pdfjs/web/viewer.html") + "?file=" + encodeURIComponent(tab.url) });
+      return;
+    }
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["annotate/selection-toolbar.js"] });
+    } catch (e) {
+      console.log("[Focus Agent] can't inject toolbar here:", e.message);
+    }
+  }
+});
+
 chrome.runtime.onInstalled.addListener((details) => {
   console.log(`[Focus Agent] v${chrome.runtime.getManifest().version} installed (${details.reason}).`);
   syncToolbarScript();
+  ensureContextMenu();
   // (The cached assignment list is deliberately KEPT across reloads — a
   // slightly stale list beats demo data while portal tabs reconnect.)
   // Re-inject content scripts into portal tabs that are already open.
