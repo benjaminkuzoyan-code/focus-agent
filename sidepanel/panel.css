@@ -705,3 +705,5 @@ body:not(.studying) .study { display: none !important; }
 .fcard .a { color: var(--green); margin-top: 4px; display: none; }
 .fcard.flip .a { display: block; }
 .fcard .hint { color: var(--muted); font-size: 10.5px; margin-top: 2px; }
+
+#dev-badge { background: rgba(252, 211, 77, 0.18); color: var(--amber); border-color: rgba(252, 211, 77, 0.45); font-weight: 800; letter-spacing: 1px; font-size: 10px; }
