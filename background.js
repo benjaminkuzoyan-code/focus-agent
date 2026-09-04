@@ -91,7 +91,7 @@ function ensureContextMenu() {
   try {
     chrome.contextMenus.removeAll(() => {
       chrome.contextMenus.create({ id: "fa-highlight-here", title: "Highlight with Focus Agent (annotate · summarize · ask)", contexts: ["page", "selection"] });
-      chrome.contextMenus.create({ id: "fa-open-pdf", title: "Open PDF in Focus Agent viewer", contexts: ["link"], targetUrlPatterns: ["*://*/*.pdf", "*://*/*.pdf?*", "*://*/*.PDF"] });
+      chrome.contextMenus.create({ id: "fa-open-pdf", title: "Open PDF in Focus Agent viewer", contexts: ["link"], targetUrlPatterns: ["*://*/*.pdf", "*://*/*.pdf?*", "*://*/*.PDF", "*://drive.google.com/file/d/*"] });
     });
   } catch (e) {
     console.log("[Focus Agent] context menu:", e.message);
@@ -99,7 +99,9 @@ function ensureContextMenu() {
 }
 chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === "fa-open-pdf" && info.linkUrl) {
-    chrome.tabs.create({ url: chrome.runtime.getURL("viewer/pdfjs/web/viewer.html") + "?file=" + encodeURIComponent(info.linkUrl) });
+    const drive = info.linkUrl.match(/drive\.google\.com\/file\/d\/([\w-]+)/);
+    const file = drive ? `https://drive.google.com/uc?export=download&id=${drive[1]}` : info.linkUrl;
+    chrome.tabs.create({ url: chrome.runtime.getURL("viewer/pdfjs/web/viewer.html") + "?file=" + encodeURIComponent(file) });
     return;
   }
   if (info.menuItemId === "fa-highlight-here" && tab?.id) {

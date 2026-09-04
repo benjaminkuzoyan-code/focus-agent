@@ -83,12 +83,19 @@ $("highlight-btn").addEventListener("click", async () => {
   };
   if (/^chrome:|^chrome-extension:\/\/(?!.*viewer\/pdfjs)/.test(tab.url) && !tab.url.includes("/viewer/pdfjs/")) return flash("✕");
   if (/docs\.google\.com\/document/.test(tab.url)) return flash("📄");
-  if (/\.pdf($|[?#])/i.test(new URL(tab.url).pathname) || tab.url.startsWith("file:")) {
-    if (!tab.url.includes("/viewer/pdfjs/")) {
-      await chrome.tabs.update(tab.id, { url: chrome.runtime.getURL("viewer/pdfjs/web/viewer.html") + "?file=" + encodeURIComponent(tab.url) });
-      return flash("↻");
+  const pdf = pdfSourceFor(tab.url);
+  if (pdf && !tab.url.includes("/viewer/pdfjs/")) {
+    // Ask for the PDF host now (still inside the click); the viewer has its
+    // own "allow" button as a fallback if this can't prompt.
+    try {
+      await chrome.permissions.request({ origins: [new URL(pdf).origin + "/*"] });
+    } catch {
+      /* viewer banner handles it */
     }
+    await chrome.tabs.update(tab.id, { url: viewerUrlFor(pdf) });
+    return flash("↻");
   }
+  if (tab.url.startsWith("file:") || /\.pdf($|[?#])/i.test(new URL(tab.url).pathname)) return flash("✕");
   try {
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["annotate/selection-toolbar.js"] });
     // Remember the site so it's on next time too (may prompt; fine if declined).
@@ -449,18 +456,29 @@ function setupMessage(plan, opened) {
   return lines.join("\n");
 }
 
-/** Open a URL in a tab; PDFs go through our pdf.js viewer so highlighting works. */
-async function openTab(url, active) {
-  let target = url;
+/**
+ * If this URL is a PDF we can show in our own viewer, return the direct file
+ * URL to load; else null. Google Drive "file" links (the usual way teachers
+ * share PDFs) map to Drive's download endpoint, which sends the file itself.
+ */
+function pdfSourceFor(url) {
   try {
     const u = new URL(url);
-    if (/\.pdf($|[?#])/i.test(u.pathname + u.search) && !u.href.startsWith(chrome.runtime.getURL(""))) {
-      target = chrome.runtime.getURL("viewer/pdfjs/web/viewer.html") + "?file=" + encodeURIComponent(url);
-    }
+    if (u.href.startsWith(chrome.runtime.getURL(""))) return null;
+    const drive = u.hostname === "drive.google.com" && u.pathname.match(/\/file\/d\/([\w-]+)/);
+    if (drive) return `https://drive.google.com/uc?export=download&id=${drive[1]}`;
+    if (/\.pdf($|[?#])/i.test(u.pathname + u.search) || u.searchParams.get("format") === "pdf") return u.href;
   } catch {
-    /* not a URL we can parse — open as-is */
+    /* not a URL */
   }
-  return chrome.tabs.create({ url: target, active });
+  return null;
+}
+const viewerUrlFor = (fileUrl) => chrome.runtime.getURL("viewer/pdfjs/web/viewer.html") + "?file=" + encodeURIComponent(fileUrl);
+
+/** Open a URL in a tab; PDFs go through our pdf.js viewer so highlighting works. */
+async function openTab(url, active) {
+  const pdf = pdfSourceFor(url);
+  return chrome.tabs.create({ url: pdf ? viewerUrlFor(pdf) : url, active });
 }
 
 /**
