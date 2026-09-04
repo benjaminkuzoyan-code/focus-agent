@@ -237,6 +237,39 @@
         </div>
       </div>
 
+      <div class="section-title">your writing voice</div>
+      <p class="muted small">Give the coach pieces you actually wrote. Anything it writes for you — steps, answers, edits — will sound like you. Stays on this device.</p>
+      <div id="voice-profile" class="voice-profile muted small"></div>
+      <div class="files" id="voice-box">
+        <div class="files-head">
+          <span>writing samples</span>
+          <span class="files-actions">
+            <button id="voice-paste" class="mini-btn" title="Paste an essay or paragraph you wrote">+ paste</button>
+            <button id="voice-file" class="mini-btn" title="Add .txt / .md / .pdf files you wrote">+ file</button>
+            <button id="voice-doc" class="mini-btn" title="Add the Google Doc in the active tab">+ this doc</button>
+            <button id="voice-drive" class="mini-btn" title="Pick from your recent Google Docs">from Drive</button>
+          </span>
+        </div>
+        <div id="voice-list" class="files-list"></div>
+        <input type="file" id="voice-input" accept=".pdf,.txt,.md,text/plain,application/pdf" multiple class="hidden" />
+        <div id="voice-drive-list" class="drive-list hidden"></div>
+        <textarea id="voice-textarea" class="hidden" placeholder="paste something you wrote (at least a paragraph)"></textarea>
+      </div>
+      <div class="settings">
+        <div class="settings-row">
+          <span>style guide <span id="voice-guide-note" class="muted small"></span></span>
+          <button id="voice-import-guide" class="chip chip-btn" title="Import the /essay skill's style guide + sample files from this computer (via the bridge)">import mine</button>
+        </div>
+        <div class="settings-row">
+          <span>learn from essays I finish <span class="muted small">(adds the doc as a sample when you hit done, if you wrote it yourself)</span></span>
+          <input type="checkbox" id="voice-auto-toggle" />
+        </div>
+        <div class="settings-row">
+          <span>rebuild the profile</span>
+          <button id="voice-rebuild" class="chip chip-btn">rebuild</button>
+        </div>
+      </div>
+
       <div class="section-title">settings</div>
       <div class="settings">
         <div class="settings-row">
@@ -298,6 +331,7 @@
   <script src="../lib/snapshot.js"></script>
   <script src="../lib/docops.js"></script>
   <script src="../lib/pdftext.js"></script>
+  <script src="../lib/voice.js"></script>
   <script src="../lib/google.js"></script>
   <script src="../lib/forecast.js"></script>
   <script src="../lib/xp.js"></script>

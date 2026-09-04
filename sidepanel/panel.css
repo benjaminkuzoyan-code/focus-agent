@@ -707,3 +707,12 @@ body:not(.studying) .study { display: none !important; }
 .fcard .hint { color: var(--muted); font-size: 10.5px; margin-top: 2px; }
 
 #dev-badge { background: rgba(252, 211, 77, 0.18); color: var(--amber); border-color: rgba(252, 211, 77, 0.45); font-weight: 800; letter-spacing: 1px; font-size: 10px; }
+
+/* ---------- writing voice ---------- */
+.voice-profile { padding: 8px 10px; border-radius: var(--r-sm); background: rgba(192, 132, 252, 0.08); border: 1px solid rgba(192, 132, 252, 0.25); line-height: 1.5; margin-bottom: 8px; white-space: pre-line; }
+.voice-profile:empty { display: none; }
+#voice-textarea { width: 100%; min-height: 110px; margin-top: 8px; resize: vertical; border-radius: var(--r-sm); border: 1px solid var(--edge); background: var(--glass); color: var(--ink); padding: 8px 10px; font: inherit; font-size: 12.5px; }
+.drive-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.drive-list button { text-align: left; background: var(--glass-strong); border: none; color: var(--ink); border-radius: var(--r-sm); padding: 7px 10px; font-size: 12px; cursor: pointer; }
+.drive-list button:hover { background: rgba(129, 140, 248, 0.25); }
+.drive-list .muted { padding: 4px 2px; }

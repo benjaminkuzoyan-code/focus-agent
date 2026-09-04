@@ -1260,6 +1260,7 @@ async function applyDocOpsFromReply(reply, target, googleConnected) {
   if (!googleConnected) return `${rest}\n\n(the coach wanted to write into your doc — connect Google first: ⚙ → connect G)`;
   try {
     const r = await FA.google.editDoc(target.id, block.ops || []);
+    if (current) await FA.store.patchAssignmentMeta(current.assignment.id, { coachWrote: true });
     return `${rest}\n\n✍️ ${block.summary || "wrote into your doc"} (${r.applied} change${r.applied === 1 ? "" : "s"})`;
   } catch (e) {
     return `${rest}\n\n(couldn't write into the doc: ${e.message})`;
@@ -1552,6 +1553,179 @@ async function copyDebugInfo() {
 $("connect-portal-btn").addEventListener("click", connectPortalFromTab);
 $("debug-btn").addEventListener("click", copyDebugInfo);
 
+/* ------------------------------------------------------------------ *
+ * Your writing voice — samples in, profile out, every writing prompt uses it
+ * ------------------------------------------------------------------ */
+async function renderVoice() {
+  const [samples, guide, profile] = await Promise.all([FA.voice.samples(), FA.voice.guide(), FA.voice.profile()]);
+  const list = $("voice-list");
+  list.innerHTML = "";
+  for (const s of samples) {
+    const chip = document.createElement("span");
+    chip.className = "file-chip";
+    const icon = s.source === "gdoc" || s.source === "drive" ? "📄" : s.source === "auto" ? "✨" : s.source === "file" ? "📎" : "✍️";
+    chip.innerHTML = `<span>${icon}</span><span class="f-title"></span><span class="f-size"></span><button class="f-x" title="remove">✕</button>`;
+    chip.querySelector(".f-title").textContent = s.title;
+    chip.querySelector(".f-size").textContent = `${s.words}w`;
+    chip.title = s.text.slice(0, 200);
+    chip.querySelector(".f-x").addEventListener("click", async () => {
+      await FA.voice.removeSample(s.id);
+      scheduleVoiceRebuild();
+      renderVoice();
+    });
+    list.appendChild(chip);
+  }
+  $("voice-guide-note").textContent = guide ? `imported ${new Date(guide.importedAt).toLocaleDateString()} (${guide.source})` : "none yet";
+  $("voice-auto-toggle").checked = settings.voiceAuto !== false;
+  const box = $("voice-profile");
+  if (profile?.profile) {
+    box.textContent = `${profile.fromClaude ? "🧠 " : "⚙️ "}${profile.profile}` + (profile.traits?.length ? `\n• ${profile.traits.slice(0, 6).join("\n• ")}` : "");
+  } else box.textContent = samples.length || guide ? "profile not built yet — tap rebuild" : "";
+}
+
+let voiceRebuildTimer = null;
+function scheduleVoiceRebuild() {
+  clearTimeout(voiceRebuildTimer);
+  voiceRebuildTimer = setTimeout(async () => {
+    $("voice-rebuild").textContent = "building…";
+    await FA.voice.rebuild();
+    $("voice-rebuild").textContent = "rebuild";
+    renderVoice();
+  }, 800);
+}
+
+async function addVoiceSample(title, text, source) {
+  const s = await FA.voice.addSample({ title, text, source });
+  if (!s) return false;
+  scheduleVoiceRebuild();
+  renderVoice();
+  return true;
+}
+
+$("voice-paste").addEventListener("click", async () => {
+  const ta = $("voice-textarea");
+  if (ta.classList.contains("hidden")) {
+    ta.classList.remove("hidden");
+    ta.focus();
+    $("voice-paste").textContent = "save";
+    return;
+  }
+  const text = ta.value.trim();
+  ta.value = "";
+  ta.classList.add("hidden");
+  $("voice-paste").textContent = "+ paste";
+  if (!text) return;
+  const ok = await addVoiceSample(text.split(/\n/)[0].slice(0, 60) || "pasted sample", text, "paste");
+  if (!ok) $("voice-guide-note").textContent = "too short (need ~80+ words) or already added";
+});
+$("voice-file").addEventListener("click", () => $("voice-input").click());
+$("voice-input").addEventListener("change", async (e) => {
+  const files = [...(e.target.files || [])];
+  e.target.value = "";
+  for (const file of files) {
+    try {
+      let text;
+      if (/pdf$/i.test(file.name) || file.type === "application/pdf") text = (await FA.pdfText.fromData(await file.arrayBuffer())).text;
+      else text = typeof file.text === "function" ? await file.text() : await new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsText(file); });
+      await addVoiceSample(file.name.replace(/\.\w+$/, ""), text, "file");
+    } catch (err) {
+      $("voice-guide-note").textContent = `couldn't read ${file.name}: ${err.message}`;
+    }
+  }
+});
+$("voice-doc").addEventListener("click", async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url || !/docs\.google\.com\/document\/d\//.test(tab.url)) {
+    $("voice-guide-note").textContent = "open one of your Google Docs in the active tab first";
+    return;
+  }
+  try {
+    const d = await FA.google.readDoc(tab.url);
+    const ok = await addVoiceSample(d.title || tab.title?.replace(/ - Google Docs$/, "") || "doc", d.text, "gdoc");
+    $("voice-guide-note").textContent = ok ? "added" : "too short or already added";
+  } catch (e) {
+    $("voice-guide-note").textContent = `couldn't read the doc: ${e.message}`;
+  }
+});
+$("voice-drive").addEventListener("click", async () => {
+  const box = $("voice-drive-list");
+  if (!box.classList.contains("hidden")) {
+    box.classList.add("hidden");
+    return;
+  }
+  box.classList.remove("hidden");
+  box.innerHTML = '<div class="muted small">loading your recent docs…</div>';
+  try {
+    const docs = await FA.google.listRecentDocs(12);
+    box.innerHTML = docs.length ? "" : '<div class="muted small">no Google Docs found for the connected account</div>';
+    for (const d of docs) {
+      const b = document.createElement("button");
+      b.textContent = `📄 ${d.name}  · ${new Date(d.modifiedTime).toLocaleDateString()}`;
+      b.addEventListener("click", async () => {
+        b.textContent = `reading “${d.name}”…`;
+        try {
+          const doc = await FA.google.readDoc(d.id);
+          const ok = await addVoiceSample(d.name, doc.text, "drive");
+          b.textContent = ok ? `✓ added ${d.name}` : `${d.name} — too short / already added`;
+        } catch (e) {
+          b.textContent = `couldn't read ${d.name}: ${e.message}`;
+        }
+      });
+      box.appendChild(b);
+    }
+  } catch (e) {
+    box.innerHTML = `<div class="muted small">${escapeHtml(/no token|OAuth|not granted/i.test(e.message) ? "connect Google first (below)" : e.message)}</div>`;
+  }
+});
+$("voice-import-guide").addEventListener("click", async () => {
+  const note = $("voice-guide-note");
+  note.textContent = "importing…";
+  try {
+    const res = await fetch("http://127.0.0.1:8000/voice/local");
+    const data = await res.json();
+    let n = 0;
+    if (data.guide) {
+      await FA.voice.setGuide(data.guide, "~/.claude/skills/essay/SKILL.md");
+      n++;
+    }
+    for (const s of data.samples || []) if (await FA.voice.addSample({ title: s.title, text: s.text, source: "file" })) n++;
+    note.textContent = n ? `imported ${data.guide ? "the style guide" : ""}${data.samples?.length ? ` + ${data.samples.length} sample file(s)` : ""}` : "nothing found in ~/.claude/skills/essay";
+    scheduleVoiceRebuild();
+    renderVoice();
+  } catch {
+    note.textContent = "the bridge isn't running (python3 bridge/coach_server.py)";
+  }
+});
+$("voice-auto-toggle").addEventListener("change", async (e) => {
+  await FA.store.setSettings({ voiceAuto: e.target.checked });
+  settings.voiceAuto = e.target.checked;
+});
+$("voice-rebuild").addEventListener("click", scheduleVoiceRebuild);
+
+/**
+ * Auto-learn: when an essay/project is finished and it has a doc the student
+ * wrote themselves (no coach writing on record), it becomes a sample.
+ */
+async function autoLearnVoice(a) {
+  if (!a || settings.voiceAuto === false) return;
+  if (!["essay", "project", "other", "homework"].includes(a.type)) return;
+  const meta = await FA.store.getMeta();
+  const m = meta?.[a.id] || {};
+  if (m.coachWrote) return; // the coach wrote into it — not the student's voice
+  if (!m.docUrl && !m.docId) return;
+  try {
+    const d = await FA.google.readDoc(m.docId || m.docUrl);
+    if (d.text.trim().split(/\s+/).length < 300) return;
+    const ok = await FA.voice.addSample({ title: a.title, text: d.text, source: "auto" });
+    if (ok) {
+      scheduleVoiceRebuild();
+      await pushCoach(`✨ Learned from “${a.title}” — it's now one of your writing samples (⚙ → your writing voice).`, { kind: "nudge" });
+    }
+  } catch {
+    /* no access — fine */
+  }
+}
+
 /** Which doc are we talking about? The assignment's, else the one in the active tab. */
 async function docTarget(assignment) {
   const { id, url } = await docFor(assignment);
@@ -1600,6 +1774,7 @@ async function devEditDoc() {
       return pushCoach(r.error || "The coach had no edits for that.");
     }
     const applied = await FA.google.editDoc(id, r.ops);
+    await FA.store.patchAssignmentMeta(current.assignment.id, { coachWrote: true });
     $("work-typing")?.remove();
     return pushCoach(`✍️ ${r.summary || "edited the doc"} (${applied.applied} change${applied.applied === 1 ? "" : "s"}).`, { kind: "dev" });
   } catch (e) {
@@ -1633,6 +1808,7 @@ async function devWriteStep(step) {
   if (docId && (await FA.google.isConnected().catch(() => false))) {
     try {
       const { words } = await FA.google.appendToDoc(docId, step.text, r.text);
+      await FA.store.patchAssignmentMeta(current.assignment.id, { coachWrote: true });
       step.done = true;
       step.doneBy = "coach";
       step.doneAt = Date.now();
@@ -1655,6 +1831,7 @@ async function devAnswerAll() {
   if (docId && (await FA.google.isConnected().catch(() => false))) {
     try {
       await FA.google.appendToDoc(docId, "Answers", r.text);
+      await FA.store.patchAssignmentMeta(current.assignment.id, { coachWrote: true });
       await pushCoach("✍️ answers written into your doc.", { kind: "dev" });
     } catch {
       /* fall through to chat */
@@ -1770,6 +1947,7 @@ async function finishWork(done) {
   if (done && a) {
     await FA.store.markDone(a.id);
     await FA.store.addQuestEvent(a, a.estMin);
+    await autoLearnVoice(a);
     // Finished → the chat log for it is over. Steps and files stay for reference.
     await FA.store.patchAssignmentMeta(a.id, { thread: [] });
     if (current) current.thread = [];
@@ -2269,6 +2447,7 @@ async function showPendingDone(pd) {
   await refreshAll();
   await loadChat();
   renderGoogleChip();
+  renderVoice();
 
   // The popup asked us to Smart Start something specific.
   const { panelStart, panelOpenTab } = await chrome.storage.local.get(["panelStart", "panelOpenTab"]);

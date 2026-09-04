@@ -72,6 +72,45 @@ DEV_POLICY = (
 )
 
 
+def _voice_block(p):
+    """The student's writing voice, for anything the coach writes on their behalf."""
+    v = p.get("voice") or None
+    if not v:
+        return ""
+    parts = ["WRITE IN THE STUDENT'S OWN VOICE. This must read like they wrote it, not like an AI."]
+    if v.get("profile"):
+        parts.append(f"Voice profile: {v['profile']}")
+    if v.get("traits"):
+        parts.append("Habits: " + "; ".join(str(t) for t in v["traits"][:12]))
+    if v.get("avoid"):
+        parts.append("Never: " + "; ".join(str(t) for t in v["avoid"][:8]))
+    if v.get("guide"):
+        parts.append("Their explicit style rules:\n" + str(v["guide"])[:3500])
+    ex = v.get("excerpts") or []
+    if ex:
+        parts.append("Samples of their real writing (match sentence rhythm, vocabulary level, transitions, punctuation habits):\n" +
+                     "\n---\n".join(f"[{e.get('title','sample')}]\n{str(e.get('text',''))[:700]}" for e in ex[:3]))
+    return "\n".join(parts) + "\n\n"
+
+
+def build_voice_profile(p):
+    samples = p.get("samples") or []
+    joined = "\n\n=== NEXT SAMPLE ===\n\n".join(f"[{s.get('title','sample')}]\n{str(s.get('text',''))[:6000]}" for s in samples[:8])
+    return (
+        f"{COACH_IDENTITY}\n\n"
+        "Here are pieces the student actually wrote. Describe HOW they write so another writer could "
+        "imitate them precisely -- sentence length and rhythm, vocabulary level, how they open and close "
+        "paragraphs, transitions they lean on, punctuation habits (semicolons, dashes, Oxford comma), "
+        "first vs third person, how they use evidence, recurring quirks and favorite phrases, and what "
+        "they never do. Be specific and quotable, not flattering.\n\n"
+        + (f"Their explicit style rules (treat as authoritative):\n{str(p.get('guide',''))[:3000]}\n\n" if p.get("guide") else "")
+        + f"Samples:\n{joined}\n\n"
+        'Reply JSON: {"profile": "<one dense paragraph, ≤120 words, how they write>", '
+        '"traits": ["<specific habit, ≤12 words>", ...] (6-12), '
+        '"avoid": ["<thing that would give away an imitation, ≤10 words>", ...] (4-8)}'
+    ), ["profile", "traits"]
+
+
 def _policy(p):
     if p.get("devMode"):
         return DEV_POLICY
@@ -191,6 +230,8 @@ def build_write_step(p):
         "finished and ready to paste. Do it fully -- no outlines, no 'you could', "
         "no placeholders. Match the assignment's requirements exactly; sound like "
         "a strong 9th grader, not a press release.\n\n"
+        + _voice_block(p) +
+        
         f"Assignment: {json.dumps(p.get('assignment', {}))}\n"
         f"The step to write: {json.dumps(p.get('step', {}))}\n"
         f"Checklist so far: {json.dumps(p.get('steps', []))}\n"
@@ -205,6 +246,8 @@ def build_answer_all(p):
         "DEVELOPER MODE: answer every question in this assignment fully. Show work "
         "where the subject calls for it (math, science). Number the answers to "
         "match the questions. Plain text.\n\n"
+        + _voice_block(p) +
+        
         f"Assignment (instructions included): {json.dumps(p.get('assignment', {}))}\n"
         + (f"Extra material the student pasted:\n---\n{str(p.get('extra') or '')[:8000]}\n---\n" if p.get("extra") else "")
         + '\nReply JSON: {"text": "<all answers>"}'
@@ -233,6 +276,8 @@ def build_edit_doc(p):
         f"{COACH_IDENTITY}\n\n"
         "DEVELOPER MODE: you have full write access to the student's Google Doc. "
         "Carry out their instruction exactly, editing the document in place.\n\n"
+        + _voice_block(p) +
+        
         f"Assignment: {json.dumps(p.get('assignment', {}))}\n"
         f"The doc, as numbered paragraphs (i = paragraph index you address ops to):\n"
         f"{json.dumps(p.get('outline', []))}\n\n"
@@ -382,6 +427,7 @@ def build_chat(p):
     return (
         f"{COACH_IDENTITY}\n\n"
         f"{_policy(p)}\n\n"
+        f"{_voice_block(p) if p.get('devMode') or p.get('mode') == 'answer' else ''}"
         f"{quiz_block}"
         "What you can see (be accurate if asked): the student's assignments, grades "
         "and schedule from their school portal; the assignment they're working on, its "
@@ -536,6 +582,7 @@ BUILDERS = {
     "readPhoto": build_read_photo,
     "editDoc": build_edit_doc,
     "flashcards": build_flashcards,
+    "voiceProfile": build_voice_profile,
     "studyPlan": build_study_plan,
     "autopsy": build_autopsy,
     "chat": build_chat,
@@ -648,6 +695,21 @@ class Handler(SimpleHTTPRequestHandler):
     SOURCE = Path(__file__).resolve()
 
     def do_GET(self):
+        if self.path == "/voice/local":
+            # The student's own style guide + sample essays on this machine
+            # (~/.claude/skills/essay). Read-only; nothing is uploaded anywhere.
+            base = Path.home() / ".claude" / "skills" / "essay"
+            out = {"guide": "", "samples": []}
+            try:
+                skill = base / "SKILL.md"
+                if skill.exists():
+                    out["guide"] = skill.read_text(errors="ignore")[:12000]
+                for f in sorted(base.rglob("*")):
+                    if f.is_file() and f.suffix.lower() in (".md", ".txt") and f.name != "SKILL.md":
+                        out["samples"].append({"title": f.stem, "text": f.read_text(errors="ignore")[:20000]})
+            except Exception as e:  # noqa: BLE001
+                out["error"] = str(e)[:200]
+            return self._send_json(200, out)
         if self.path == "/health":
             try:
                 mtime = self.SOURCE.stat().st_mtime

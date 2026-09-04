@@ -288,6 +288,21 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   $("done-close").click();
   check("settings: connect my school + debug info present", Boolean($("connect-portal-btn") && $("debug-btn")));
 
+  // Writing voice: samples → stats profile → available to writing prompts
+  check("voice section present", Boolean($("voice-list") && $("voice-import-guide") && $("voice-auto-toggle")));
+  const sample = "I finished the code, and it passed all tests. Although the bug was tricky, I managed to fix it; the missing dependency had hidden in a config file nobody read. When the tests failed, I investigated the issue, and I discovered the cause within an hour. Therefore the fix was small, but the lesson was not. Moreover, the experience taught me to read the config first. I now check dependencies before I write a single line, and I keep notes so the next person does not repeat my mistake. Consequently my debugging time dropped by half over the semester.";
+  const added = await window.eval(`FA.voice.addSample({ title: "Debugging essay", text: ${JSON.stringify(sample)}, source: "paste" })`);
+  check("sample stored (≥80 words)", added && (store.voiceSamples || []).length === 1);
+  const rejected = await window.eval(`FA.voice.addSample({ title: "tiny", text: "too short", source: "paste" })`);
+  check("too-short sample rejected", rejected === null);
+  const prof = await window.eval("FA.voice.rebuild()");
+  check("stats profile built offline", prof && /sentences average \d+ words/.test(prof.traits[0]) && prof.traits.some((x) => /semicolon/.test(x)));
+  const pkg = await window.eval("FA.voice.forBrain()");
+  check("voice package for prompts has profile + excerpt", pkg && pkg.profile.length > 10 && pkg.excerpts.length === 1 && pkg.sampleCount === 1);
+  await window.eval("renderVoice()");
+  await sleep(100);
+  check("voice chip rendered in settings", window.document.querySelectorAll("#voice-list .file-chip").length === 1);
+
   // time budget → inline plan
   window.document.querySelector('.time-chip[data-min="60"]').click();
   await sleep(300);
