@@ -572,9 +572,23 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
+    # The bridge is a long-lived process: edits to this file do nothing until
+    # it's restarted. /health says so, and the panel shows it.
+    STARTED = time.time()
+    SOURCE = Path(__file__).resolve()
+
     def do_GET(self):
         if self.path == "/health":
-            return self._send_json(200, {"ok": True, "brain": "claude", "model": MODEL})
+            try:
+                mtime = self.SOURCE.stat().st_mtime
+            except OSError:
+                mtime = 0
+            return self._send_json(200, {
+                "ok": True, "brain": "claude", "model": MODEL,
+                "started": int(self.STARTED), "sourceMtime": int(mtime),
+                "stale": mtime > self.STARTED,   # file edited since launch → restart me
+                "methods": sorted(BUILDERS.keys()),
+            })
         return super().do_GET()
 
     def do_POST(self):

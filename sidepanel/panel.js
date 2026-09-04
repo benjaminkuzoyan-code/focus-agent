@@ -2005,11 +2005,17 @@ async function showPendingDone(pd) {
  * ------------------------------------------------------------------ */
 (async () => {
   const brain = await FA.initCoach();
-  $("brain-badge").textContent = brain === "claude" ? "🧠 Claude (bridge)" : "⚙️ rules";
-  $("brain-badge").title =
-    brain === "claude"
+  const stale = brain === "claude" && FA.bridgeHealth?.stale;
+  $("brain-badge").textContent = stale ? "🧠 bridge needs restart" : brain === "claude" ? "🧠 Claude (bridge)" : "⚙️ rules";
+  $("brain-badge").title = stale
+    ? "The bridge's code changed since it was started — its prompts are out of date. Ctrl-C it and run: python3 bridge/coach_server.py"
+    : brain === "claude"
       ? "Real Claude brain (local bridge running)"
       : "Rule-based coach — start the bridge for the real brain: python3 bridge/coach_server.py";
+  if (stale) {
+    sourceNotice = "⚠️ The coach bridge is running old code — restart it (Ctrl-C, then python3 bridge/coach_server.py) or new features won't reach the brain.";
+    $("forecast-headline").textContent = sourceNotice;
+  }
 
   await loadAssignments();
   await refreshAll();
