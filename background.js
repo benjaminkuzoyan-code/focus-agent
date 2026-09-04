@@ -256,6 +256,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
       }
 
+      case "FETCH_PDF": {
+        // Fetch a PDF for the panel / our viewer. Drive files: the connected
+        // Google account first (Drive API), then the browser's own Drive login
+        // (cookies — the school account, usually). Anything else: cookie fetch.
+        try {
+          const buf = await fetchPdfBytes(message.url);
+          sendResponse({ ok: true, base64: bytesToBase64(new Uint8Array(buf)) });
+        } catch (e) {
+          sendResponse({ ok: false, error: e.message });
+        }
+        break;
+      }
+
       case "NIGHTLY_SYNC":
         await syncNightlyAlarm();
         sendResponse({ ok: true });
@@ -283,6 +296,62 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   })();
   return true; // async
 });
+
+/* ------------------------------------------------------------------ *
+ * PDF fetching (Drive-aware)
+ * ------------------------------------------------------------------ */
+function driveIdOf(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname !== "drive.google.com" && u.hostname !== "docs.google.com") return null;
+    return u.searchParams.get("id") || (u.pathname.match(/\/file\/d\/([\w-]+)/) || [])[1] || null;
+  } catch {
+    return null;
+  }
+}
+
+function bytesToBase64(bytes) {
+  let s = "";
+  const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  return btoa(s);
+}
+
+async function fetchPdfBytes(url) {
+  const id = driveIdOf(url);
+  if (id) {
+    // 1. Drive API with the connected account (works for anything shared with it).
+    try {
+      if (await FA.google.isConnected()) return await FA.google.fetchDriveFileBytes(id);
+    } catch (e) {
+      console.log("[Focus Agent] Drive API fetch failed, trying cookies:", e.message);
+    }
+    // 2. The browser's Drive session (needs drive.google.com host permission).
+    let res = await fetch(`https://drive.google.com/uc?export=download&id=${id}`, { credentials: "include" });
+    let type = res.headers.get("content-type") || "";
+    if (type.includes("text/html")) {
+      // Large files get a "can't scan for viruses" page with a confirm token.
+      const html = await res.text();
+      const confirm = html.match(/confirm=([\w-]+)/)?.[1] || "t";
+      const uuid = html.match(/name="uuid" value="([\w-]+)"/)?.[1];
+      const u = new URL("https://drive.usercontent.google.com/download");
+      u.searchParams.set("id", id);
+      u.searchParams.set("export", "download");
+      u.searchParams.set("confirm", confirm);
+      if (uuid) u.searchParams.set("uuid", uuid);
+      res = await fetch(u, { credentials: "include" });
+      type = res.headers.get("content-type") || "";
+      if (type.includes("text/html")) throw new Error("Drive wants you signed in — open the file in Drive once (or connect the Google account it's shared with)");
+    }
+    if (!res.ok) throw new Error(`Drive download ${res.status}`);
+    return res.arrayBuffer();
+  }
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) throw new Error(`fetch ${res.status}`);
+  const type = res.headers.get("content-type") || "";
+  if (type.includes("text/html")) throw new Error("that link returned a web page, not a PDF");
+  return res.arrayBuffer();
+}
 
 /* ------------------------------------------------------------------ *
  * Alarms: check-ins + commitment receipts

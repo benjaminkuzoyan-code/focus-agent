@@ -88,7 +88,8 @@ $("highlight-btn").addEventListener("click", async () => {
     // Ask for the PDF host now (still inside the click); the viewer has its
     // own "allow" button as a fallback if this can't prompt.
     try {
-      await chrome.permissions.request({ origins: [new URL(pdf).origin + "/*"] });
+      const origins = isDriveUrl(pdf) ? ["https://drive.google.com/*", "https://drive.usercontent.google.com/*"] : [new URL(pdf).origin + "/*"];
+      await chrome.permissions.request({ origins });
     } catch {
       /* viewer banner handles it */
     }
@@ -473,7 +474,10 @@ function pdfSourceFor(url) {
   }
   return null;
 }
-const viewerUrlFor = (fileUrl) => chrome.runtime.getURL("viewer/pdfjs/web/viewer.html") + "?file=" + encodeURIComponent(fileUrl);
+// Drive files can't be streamed by pdf.js (login, confirm pages) → the viewer
+// asks the worker to fetch them (fa_file). Plain URLs stream directly (file).
+const isDriveUrl = (u) => /^https:\/\/(drive|docs)\.google\.com\//.test(u);
+const viewerUrlFor = (fileUrl) => chrome.runtime.getURL("viewer/pdfjs/web/viewer.html") + (isDriveUrl(fileUrl) ? "?fa_file=" : "?file=") + encodeURIComponent(fileUrl);
 
 /** Open a URL in a tab; PDFs go through our pdf.js viewer so highlighting works. */
 async function openTab(url, active) {
@@ -845,7 +849,8 @@ async function attachUrl(url, title = "", { silent = false } = {}) {
     clean = pdf;
   } else if (url.includes("/viewer/pdfjs/")) {
     kind = "pdf";
-    clean = new URL(url).searchParams.get("file") || url;
+    const sp = new URL(url).searchParams;
+    clean = sp.get("file") || sp.get("fa_file") || url;
   }
   if (current.files.some((f) => f.url === clean)) return null;
   const f = { id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), kind, title: title || "", url: clean, text: "", chars: 0, addedAt: Date.now() };
@@ -860,6 +865,15 @@ async function attachUrl(url, title = "", { silent = false } = {}) {
 async function attachActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url || /^chrome:/.test(tab.url)) return pushCoach("Switch to the tab with the reading, then tap + this tab.");
+  // Drive-hosted files need the Drive host (for the cookie fallback) — ask now, inside the click.
+  const pdf = pdfSourceFor(tab.url);
+  if (pdf && isDriveUrl(pdf)) {
+    try {
+      await chrome.permissions.request({ origins: ["https://drive.google.com/*", "https://drive.usercontent.google.com/*"] });
+    } catch {
+      /* Drive API path may still work */
+    }
+  }
   if (tab.url.startsWith(chrome.runtime.getURL("")) && !tab.url.includes("/viewer/pdfjs/")) return;
   return attachUrl(tab.url, (tab.title || "").replace(/ - Google (Docs|Drive)$/, ""));
 }

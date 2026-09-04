@@ -29,7 +29,8 @@
   /** Storage key: one bucket per document (PDF viewer keys on the PDF's URL). */
   function pageKey() {
     if (IS_PDF_VIEWER) {
-      const f = new URL(location.href).searchParams.get("file");
+      const sp = new URL(location.href).searchParams;
+      const f = sp.get("file") || sp.get("fa_file");
       return "fa-hl:" + (f || location.href);
     }
     return "fa-hl:" + location.origin + location.pathname;
