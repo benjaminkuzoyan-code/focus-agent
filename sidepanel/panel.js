@@ -56,6 +56,7 @@ function showView(name) {
   view = name;
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
   document.querySelectorAll(".dock .tab").forEach((b) => b.classList.toggle("active", b.dataset.view === name || (name === "work" && b.dataset.view === "list") || (name === "done" && b.dataset.view === "list")));
+  if (name === "chat") setTimeout(() => $("chat-input")?.focus(), 50);
   $("more-btn").textContent = name === "more" ? "◂" : "⚙";
   $("more-btn").title = name === "more" ? "Back" : "Settings";
   window.scrollTo({ top: 0 });
@@ -2353,7 +2354,12 @@ $("chat-send").addEventListener("click", () => sendChat());
 $("chat-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendChat();
 });
-document.querySelectorAll("#view-more .chat-chip").forEach((chip) => chip.addEventListener("click", () => sendChat(chip.dataset.msg)));
+document.querySelectorAll("#view-chat .chat-chip[data-msg]").forEach((chip) => chip.addEventListener("click", () => sendChat(chip.dataset.msg)));
+$("chat-clear").addEventListener("click", async () => {
+  chatHistory = [];
+  await chrome.storage.local.set({ chatHistory: [] });
+  renderChatMessages();
+});
 
 // ✏️ draw on the current page (toggles; the annotator handles its own teardown).
 $("annotate-btn").addEventListener("click", async () => {

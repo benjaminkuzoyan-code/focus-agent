@@ -716,3 +716,6 @@ body:not(.studying) .study { display: none !important; }
 .drive-list button { text-align: left; background: var(--glass-strong); border: none; color: var(--ink); border-radius: var(--r-sm); padding: 7px 10px; font-size: 12px; cursor: pointer; }
 .drive-list button:hover { background: rgba(129, 140, 248, 0.25); }
 .drive-list .muted { padding: 4px 2px; }
+
+/* ---------- chat view (4th dock button) ---------- */
+.full-chat { min-height: 40vh; max-height: calc(100vh - 300px); overflow-y: auto; }

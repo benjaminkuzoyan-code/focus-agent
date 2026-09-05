@@ -210,12 +210,19 @@
       </div>
       <div id="commit-list" class="list"></div>
 
+    </section>
+
+    <!-- ============ CHAT ============ -->
+    <section id="view-chat" class="view chat-view">
       <div class="section-title">ask the coach anything</div>
-      <div id="chat-messages" class="chat-messages more-chat"></div>
+      <p class="muted small">Not tied to one assignment — your week, your grades, what to do next. It knows your portal, your pace and your files. Clears when you Smart Start something new.</p>
+      <div id="chat-messages" class="chat-messages full-chat"></div>
       <div class="chat-chips">
         <button class="chat-chip" data-msg="Replan my week — what should I move around?">replan my week</button>
         <button class="chat-chip" data-msg="Why should I start with the assignment you picked?">why this first?</button>
+        <button class="chat-chip" data-msg="What's due in the next 3 days, in order?">what's due soon</button>
         <button class="chat-chip" data-msg="Quiz me on what I just studied.">quiz me</button>
+        <button class="chat-chip" id="chat-clear">clear</button>
       </div>
       <div class="chat-input-row">
         <input type="text" id="chat-input" placeholder="talk to your coach…" autocomplete="off" />
@@ -319,6 +326,7 @@
   <!-- Three buttons. Settings live behind ⚙ in the header. -->
   <nav class="dock">
     <button class="tab active" data-view="list" title="Today"><span>🏠</span><small>today</small></button>
+    <button class="tab" data-view="chat" title="Ask the coach anything"><span>💬</span><small>coach</small></button>
     <button class="tab" data-view="you" title="Your stats, streak, XP"><span>📈</span><small>you</small></button>
     <button class="tab" data-view="classes" title="Classes, grades, schedule"><span>🎓</span><small>classes</small></button>
   </nav>
