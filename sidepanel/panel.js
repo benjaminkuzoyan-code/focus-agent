@@ -129,6 +129,7 @@ async function loadAssignments(retried = false) {
   $("mode-select").value = settings.mode || "tutor";
   $("dev-toggle").checked = Boolean(settings.devMode);
   $("nightly-toggle").checked = Boolean(settings.nightlyPlan);
+  $("autopilot-toggle").checked = Boolean(settings.autopilot);
   $("auto-done-toggle").checked = Boolean(settings.autoDone);
   document.body.classList.toggle("dev", Boolean(settings.devMode));
 
@@ -558,7 +559,12 @@ async function smartStart(assignment, minOverride) {
   // 3. Smart Setup: read the instructions, open what they call for.
   const resources = await buildSetupResources(assignment);
   const meta = await FA.store.getMeta();
-  const plan = meta?.[assignment.id]?.setupPlan || new FA.MockCoach().setup(assignment, resources);
+  const autopilot = Boolean(settings.devMode && settings.autopilot);
+  let plan = meta?.[assignment.id]?.setupPlan || new FA.MockCoach().setup(assignment, resources);
+  // What the plan SAYS to open, it opens. Autopilot opens everything relevant
+  // and always wants the doc when written work is involved.
+  plan = FA.resolveOpens(plan, resources, { aggressive: autopilot });
+  if (autopilot && ["essay", "project", "homework", "other", "lab"].includes(assignment.type)) plan = { ...plan, doc: Boolean(resources.googleConnected) };
 
   await permission; // resolved or denied — either way we go on
   if (assignment.url) await rememberTab(await openTab(assignment.url, true));
@@ -590,20 +596,32 @@ async function smartStart(assignment, minOverride) {
     settings.hintedHighlight = true;
     await pushCoach("Tip: on the pages I opened, select any text → 🖍 annotate · ≡ summarize · ? ask pop up above it. Other page? Tap 🖍 in the header first. (Google Docs can't be highlighted — use check my draft.)", { kind: "nudge" });
   }
-  if ((plan.confidence ?? 1) < 0.6 && plan.missing?.length) {
+  if ((plan.confidence ?? 1) < 0.6 && plan.missing?.length && !autopilot) {
     await pushCoach(`Before we go — ${plan.missing[0]}?`, { kind: "question" });
   }
+
+  // 4b. Autopilot (Ben's build): no questions — do the work, then report.
+  if (autopilot) runAutopilot(assignment).catch((e) => console.warn("[Focus Agent] autopilot:", e.message));
 
   // 5. Brain upgrade in the background: better plan + suggested extras as
   //    click-to-open lines, never surprise tabs mid-session.
   if (FA.coachBrain === "claude" && !plan.fromClaude) {
     Promise.resolve(FA.coach.setup(assignment, resources))
-      .then(async (brainPlan) => {
+      .then(async (brainPlan0) => {
+        let brainPlan = brainPlan0;
         if (!brainPlan.fromClaude || current?.assignment.id !== assignment.id) return;
+        brainPlan = FA.resolveOpens(brainPlan, resources, { aggressive: autopilot });
         await FA.store.patchAssignmentMeta(assignment.id, { setupPlan: brainPlan });
         const alreadyOpened = new Set((plan.opens || []).map((o) => `${o.kind}:${o.i}`));
-        const extras = (brainPlan.opens || [])
-          .filter((o) => !alreadyOpened.has(`${o.kind}:${o.i}`))
+        const extraOpens = (brainPlan.opens || []).filter((o) => !alreadyOpened.has(`${o.kind}:${o.i}`));
+        // Autopilot: open what the brain added too, instead of offering buttons.
+        if (autopilot) {
+          for (const o of extraOpens) {
+            const target = o.kind === "link" ? resources.links[o.i] : resources.topics[o.i];
+            if (target?.url) await rememberTab(await openTab(target.url, false));
+          }
+        }
+        const extras = (autopilot ? [] : extraOpens)
           .map((o) => (o.kind === "link" ? resources.links[o.i] : resources.topics[o.i]))
           .filter((t) => t?.url);
         let text = "🧠 " + setupMessage(brainPlan, opened);
@@ -1382,6 +1400,8 @@ async function runChip(cmd) {
       return makeStudyPlan();
     case "dev-edit":
       return devEditDoc();
+    case "dev-autopilot":
+      return runAutopilot(current.assignment);
     case "dev-write":
       return devWriteStep(cur);
     case "dev-answer":
@@ -1759,6 +1779,68 @@ async function formatMyDoc() {
 /* ------------------------------------------------------------------ *
  * Ben's build — the coach does the work (developer mode only)
  * ------------------------------------------------------------------ */
+
+/**
+ * Dev autopilot: the coach does the assignment. Waits for the checklist
+ * (brain version if it lands within a few seconds), makes sure there's a
+ * doc when the work is written, then writes every unchecked step into it in
+ * order, checking each off. Worksheet-style work with no doc → answerAll.
+ * Stops if you switch assignments. Never finishes/submits by itself — that
+ * stays behind auto-actions on done.
+ */
+let autopilotRunning = false;
+async function runAutopilot(assignment) {
+  if (autopilotRunning) return;
+  autopilotRunning = true;
+  const mine = () => current?.assignment.id === assignment.id;
+  try {
+    await pushCoach("🚀 autopilot: opening everything, then doing the steps. Sit back — I'll say when it's done.", { kind: "dev" });
+    // Let the brain's checklist replace the rules one (it usually lands in <10s).
+    for (let i = 0; i < 12 && mine() && current.steps.every((s) => s.source === "rules"); i++) await new Promise((r) => setTimeout(r, 1000));
+    if (!mine()) return;
+
+    const googleOn = await FA.google.isConnected().catch(() => false);
+    let { id: docId } = await docFor(assignment);
+    const written = ["essay", "project", "homework", "other", "lab", "reading"].includes(assignment.type);
+    if (!docId && written && googleOn) {
+      try {
+        const { id, url } = await FA.google.createOutlineDoc(assignment.title, assignment.course, current.steps.map((s) => s.text));
+        await FA.store.patchAssignmentMeta(assignment.id, { docUrl: url, docId: id });
+        docId = id;
+        await rememberTab(await chrome.tabs.create({ url, active: false }));
+        await attachUrl(url, "your doc", { silent: true });
+        await pushCoach("📄 made the doc with the outline in it.", { kind: "dev" });
+      } catch (e) {
+        await pushCoach(`couldn't create a doc (${e.message}) — writing in chat instead.`, { kind: "dev" });
+      }
+    }
+
+    if (assignment.type === "test") {
+      await makeStudyPlan();
+      await makeFlashcards();
+      await pushCoach("🚀 autopilot done: study plan + flashcards ready. Tests can't be done for you — quiz me when you want.", { kind: "dev" });
+      return;
+    }
+
+    if (!docId && !googleOn && assignment.description && assignment.description.length > 40) {
+      await devAnswerAll();
+      await pushCoach("🚀 autopilot done: answers are above. Connect Google (⚙) and I'll put them straight into a doc next time.", { kind: "dev" });
+      return;
+    }
+
+    let n = 0;
+    for (const step of [...current.steps]) {
+      if (!mine()) return;
+      if (step.done) continue;
+      await pushCoach(`✍️ step: ${step.text}`, { kind: "dev" });
+      await devWriteStep(step);
+      n++;
+    }
+    await pushCoach(`🚀 autopilot done: ${n} step${n === 1 ? "" : "s"} written${docId ? " into your doc" : ""}. Read it once, then done ✓${settings.autoDone ? " (auto-actions will tick myPoly + book the next block)" : ""}.`, { kind: "dev" });
+  } finally {
+    autopilotRunning = false;
+  }
+}
 
 /** Dev: free-form edits to the doc, decided by the brain, applied in place. */
 async function devEditDoc() {
@@ -2339,6 +2421,10 @@ $("dev-toggle").addEventListener("change", async (e) => {
   await FA.store.setSettings({ devMode: e.target.checked });
   settings.devMode = e.target.checked;
   document.body.classList.toggle("dev", e.target.checked);
+});
+$("autopilot-toggle").addEventListener("change", async (e) => {
+  await FA.store.setSettings({ autopilot: e.target.checked });
+  settings.autopilot = e.target.checked;
 });
 $("nightly-toggle").addEventListener("change", async (e) => {
   await FA.store.setSettings({ nightlyPlan: e.target.checked });

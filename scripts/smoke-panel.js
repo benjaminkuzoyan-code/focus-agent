@@ -207,7 +207,7 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   $("dev-toggle").dispatchEvent(new window.Event("change", { bubbles: true }));
   await sleep(100);
   check("dev toggle flips body.dev + persists", window.document.body.classList.contains("dev") && store.settings?.devMode === true);
-  check("dev chips present (5)", window.document.querySelectorAll("#work-chips .chat-chip.dev").length === 5);
+  check("dev chips present (6)", window.document.querySelectorAll("#work-chips .chat-chip.dev").length === 6);
   check("nightly + auto-done settings rows exist", Boolean($("nightly-toggle") && $("auto-done-toggle")));
   $("more-btn").click();
   await sleep(100);
@@ -302,6 +302,15 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   await window.eval("renderVoice()");
   await sleep(100);
   check("voice chip rendered in settings", window.document.querySelectorAll("#voice-list .file-chip").length === 1);
+
+  // "open the module" actually opens the module
+  const r1 = await window.eval("FA.resolveOpens({opens:[], focus:'Reread the module before answering', gather:['Unit 1 Notes']}, {topics:[{name:'Unit 1 Notes', url:'u1', published:'2026-09-01'},{name:'Syllabus', url:'u0', published:'2026-08-20'}], links:[{text:'Reading packet', url:'l0'}], description:''})");
+  check("plan text naming a topic → it opens", r1.opens.some((o) => o.kind === "topic" && o.i === 0), JSON.stringify(r1.opens));
+  const r2 = await window.eval("FA.resolveOpens({opens:[], focus:'open the module and start', gather:[]}, {topics:[{name:'Old Unit', url:'a', published:'2026-08-01'},{name:'New Unit', url:'b', published:'2026-09-01'}], links:[], description:''})");
+  check("'the module' with no name → latest topic", r2.opens.length === 1 && r2.opens[0].i === 1);
+  const r3 = await window.eval("FA.resolveOpens({opens:[], focus:'x', gather:[]}, {topics:[{name:'T', url:'a'}], links:[{text:'A', url:'1'},{text:'B', url:'2'}], description:''}, {aggressive:true})");
+  check("autopilot opens every link + a topic", r3.opens.filter((o) => o.kind === "link").length === 2 && r3.opens.some((o) => o.kind === "topic"));
+  check("autopilot chip + setting exist (dev)", Boolean(window.document.querySelector('[data-cmd="dev-autopilot"]') && $("autopilot-toggle")));
 
   // time budget → inline plan
   window.document.querySelector('.time-chip[data-min="60"]').click();

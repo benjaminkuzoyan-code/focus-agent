@@ -80,6 +80,7 @@ Still running underneath: tab parking (distractors move to a minimized window �
 - `mark it complete` — ticks the assignment in myPoly. **Pending a spike:** `adapters/blackbaud.js` `markComplete` throws until the portal's own request is captured (DevTools → Network → tick an assignment by hand → copy URL/method/body).
 - **chat can write:** with a doc attached and Google connected, asking the coach in chat to write/fix/format something in the doc makes it answer with a `docops` block that is applied in place (never in the student build).
 - `edit my doc…` — type an instruction; the coach reads the doc as numbered paragraphs and returns edit ops (replaceAll, setStyle, insertAfter, replaceParagraph, deleteParagraph, append, replaceBody) that are applied in place. Full write access, anywhere in the doc.
+- **🚀 autopilot** (chip, or *autopilot on Smart Start* setting) — opens every teacher link and the module, creates the Google Doc with the outline, writes every unchecked step into it in order and checks them off (worksheets with no doc → answers in chat; tests → study plan + flashcards). Never finishes or submits by itself.
 - **auto-actions on done** (setting) — tick complete in myPoly + a Calendar block for the next item, reported under the debrief.
 - **nightly auto-plan** (setting) — 4:30pm: rank the cached assignments, build tonight's plan (same engine as the time chips), write the blocks to Google Calendar, one notification. S04 does this by hand in ChatGPT every night.
 

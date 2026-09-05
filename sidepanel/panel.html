@@ -139,6 +139,7 @@
         <button class="chat-chip dev" data-cmd="dev-photo" title="Dev: photo of paper work → steps checked + feedback">📷 photo of my work</button>
         <button class="chat-chip dev" data-cmd="dev-complete" title="Dev: tick it complete in myPoly">mark it complete</button>
         <button class="chat-chip dev" data-cmd="dev-edit" title="Dev: tell the coach what to change in the doc — it edits in place">edit my doc…</button>
+        <button class="chat-chip dev" data-cmd="dev-autopilot" title="Dev: open everything, make the doc, write every step, check them off">🚀 autopilot</button>
       </div>
       <input type="file" id="photo-input" accept="image/*" capture="environment" class="hidden" />
       <div class="chat-input-row">
@@ -312,6 +313,10 @@
         <div class="settings-row dev">
           <span>nightly auto-plan <span class="muted small">(4:30pm: plan tonight, write Calendar blocks)</span></span>
           <input type="checkbox" id="nightly-toggle" />
+        </div>
+        <div class="settings-row dev">
+          <span>autopilot on Smart Start <span class="muted small">(open every resource, create the doc, write every step, no prompts)</span></span>
+          <input type="checkbox" id="autopilot-toggle" />
         </div>
         <div class="settings-row dev">
           <span>auto-actions on done <span class="muted small">(tick complete in myPoly · Calendar block for the next item)</span></span>
