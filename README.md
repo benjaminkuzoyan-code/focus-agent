@@ -33,7 +33,7 @@ focus-agent/
 │   ├── blackbaud.js     # DataDirect API (verified on polytechnic.myschoolapp.com)
 │   ├── canvas.js        # Canvas planner/todo API (UNTESTED — friend's machine)
 │   ├── classroom.js     # Classroom DOM scrape (UNTESTED — friend's machine)
-│   └── mock.js          # Demo data — the default all summer
+│   └── detect.js        # Which school system is this page? (connect my school / debug info)
 ├── lib/
 │   ├── storage.js       # Sessions, streaks, commitments (all on-device)
 │   ├── priority.js      # Urgency scoring + PERSONAL pace estimates
@@ -86,36 +86,14 @@ Still running underneath: tab parking (distractors move to a minimized window �
 
 Cut in v0.7: boss battles, the Quests tab, the Panic tab (now the time chips), the Timer tab (now the work view), per-card Explain/Pre-check/Break-down buttons (now chips inside the work view).
 
-## The bridge server (demo portal + REAL Claude brain, no API key)
+## The bridge server (the REAL Claude brain, no API key yet)
 
-One server does both: serves the fake Blackbaud in `demo-portal/` AND gives
-the extension a real Claude brain via headless Claude Code (`claude -p`),
-which uses Ben's existing login — no API key required.
-
-```bash
-cd ~/Projects/focus-agent
-python3 bridge/coach_server.py
-```
-
-With the bridge running, the side panel shows 🧠 and the coach's picks,
-panic triage, breakdowns, and autopsy come from actual Claude (~5-20s per
-call, upgraded in place over the instant rules version). Without it, the
-extension shows ⚙️ and falls back to the built-in rules — nothing breaks.
-Each brain call spends a little of Ben's Claude plan quota. When the API
-key lands, the bridge's `claude -p` swaps for a real API call and nothing
-else changes.
-
-Then open **http://localhost:8000/demo-portal/** — within ~2 seconds you
-should see priority badges appear on the assignment rows (glowing
-"▶ START HERE" on the coach's pick) and the coach bubble bottom-right.
-
-> The `http://localhost:8000/*` manifest entry and `adapters/demo.js` are
-> dev-only — remove both before any public/Web Store release.
+`python3 bridge/coach_server.py` runs on `127.0.0.1:8000` and turns the extension's requests into headless `claude -p` calls with Ben's login. Restart it after editing — the panel shows **🧠 bridge needs restart** when its code is stale. Friends' machines don't have it: without the bridge the coach is rules-only until the API key + hosted backend land.
 
 ## Test checklist
 
-### On this machine (mock data — do these now)
-- [ ] Load unpacked → open side panel → Today list renders with ranked mock assignments
+### On this machine (do these now)
+- [ ] Load unpacked → open side panel → Today list renders with your ranked assignments (portal tab open)
 - [ ] Coach box picks the overdue item first with a reason
 - [ ] Forecast strip shows a storm on the crunch day; headline names it
 - [ ] Panic tab → 120 min → schedule renders; every due-soon item is scheduled OR listed as a sacrifice
@@ -128,7 +106,7 @@ should see priority badges appear on the assignment rows (glowing
 - [ ] Quests tab → Biology test appears as a boss; mark its lead-up work done → HP drops
 - [ ] Restart Chrome → sessions/streak/XP all still there
 
-### v0.3 features (mock data / any page)
+### v0.3 features (any page)
 - [ ] Stats tab: 4 charts render (daily minutes, power hours, distraction trend, top sites) — empty-state notes if no sessions yet
 - [ ] Run a session, drift to YouTube → afterwards the site shows in "What's costing you" with a refocus estimate
 - [ ] Any normal webpage → panel ✏️ button → toolbar appears → highlight + pen + erase work → scroll (strokes anchored) → close → reopen annotator → strokes restore → 🗑️ clears

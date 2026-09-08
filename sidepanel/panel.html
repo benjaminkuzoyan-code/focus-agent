@@ -296,13 +296,6 @@
           </select>
         </div>
         <div class="settings-row">
-          <span>data source</span>
-          <select id="source-select" title="Data source">
-            <option value="mock">demo</option>
-            <option value="auto">portal</option>
-          </select>
-        </div>
-        <div class="settings-row">
           <span>draw on this page <span class="muted small">(pen/highlighter canvas)</span></span>
           <button id="annotate-btn" class="chip chip-btn" title="Highlighter/pen overlay on the current tab">✏️</button>
         </div>
@@ -338,7 +331,6 @@
 
   <!-- Load order matters: schema → adapters → libs → panel logic -->
   <script src="../adapters/schema.js"></script>
-  <script src="../adapters/mock.js"></script>
   <script src="../lib/storage.js"></script>
   <script src="../lib/priority.js"></script>
   <script src="../lib/snapshot.js"></script>

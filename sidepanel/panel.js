@@ -15,7 +15,7 @@
 /* ------------------------------------------------------------------ *
  * State
  * ------------------------------------------------------------------ */
-let assignments = [];   // normalized, from mock adapter / portal / cache
+let assignments = [];   // normalized, from the portal tab or the cache
 let ranked = [];        // assignments + estMin + urgency, sorted
 let sourceNotice = "";  // why we're NOT showing live portal data ("" when live)
 let snapshot = null;    // full Student Snapshot (classes, grades, schedule)
@@ -122,10 +122,9 @@ $("highlight-btn").addEventListener("click", async () => {
  * Data loading
  * ------------------------------------------------------------------ */
 
-/** Load assignments per the chosen source: mock, or live portal tab, or cache. */
+/** Load assignments: a live portal tab first, else the last cached fetch. */
 async function loadAssignments(retried = false) {
   settings = await FA.store.getSettings();
-  $("source-select").value = settings.dataSource;
   $("mode-select").value = settings.mode || "tutor";
   $("dev-toggle").checked = Boolean(settings.devMode);
   $("nightly-toggle").checked = Boolean(settings.nightlyPlan);
@@ -134,16 +133,12 @@ async function loadAssignments(retried = false) {
   document.body.classList.toggle("dev", Boolean(settings.devMode));
 
   sourceNotice = "";
-  if (settings.dataSource === "mock") {
-    assignments = await FA.adapters.mock.fetchAssignments();
-    return;
-  }
 
-  // "auto": find an open portal tab and ask its content script.
+  // Find an open portal tab and ask its content script.
   const tabs = await chrome.tabs.query({ url: PORTAL_URL_PATTERNS });
 
   // Every step is recorded so a failure explains itself in the headline
-  // instead of silently showing demo data.
+  // instead of silently showing nothing.
   const diag = [`${tabs.length} portal tab${tabs.length === 1 ? "" : "s"} open`];
   let disconnected = 0;
 
@@ -196,8 +191,8 @@ async function loadAssignments(retried = false) {
     assignments = cache.items;
     sourceNotice = `⚠️ Cached assignments from ${new Date(cache.fetchedAt).toLocaleTimeString()} — ${why}. Refresh your portal tab, then hit ↻.`;
   } else {
-    assignments = await FA.adapters.mock.fetchAssignments();
-    sourceNotice = `⚠️ Demo data — ${why}. Open your school portal, refresh it, then hit ↻.`;
+    assignments = [];
+    sourceNotice = `Open your school portal in a tab (myPoly, Canvas, Classroom — or ⚙ → connect my school), then hit ↻. ${why}.`;
   }
 }
 
@@ -297,7 +292,9 @@ function renderList(meta = {}) {
   const list = $("today-list");
   list.innerHTML = "";
   if (!ranked.length) {
-    list.innerHTML = '<div class="empty-note">Nothing pending. 🏖️</div>';
+    list.innerHTML = assignments.length
+      ? '<div class="empty-note">Nothing pending. 🏖️</div>'
+      : '<div class="empty-note">No assignments yet.<br><span class="small">Open your school portal in a tab and hit ↻ — or ⚙ → connect my school.</span></div>';
     return;
   }
 
@@ -1507,7 +1504,6 @@ async function connectPortalFromTab() {
     await chrome.storage.local.set({ customPortals });
     if (!PORTAL_URL_PATTERNS.includes(origin + "/*")) PORTAL_URL_PATTERNS.push(origin + "/*");
     await FA.store.setSettings({ dataSource: "auto" });
-    $("source-select").value = "auto";
     note.textContent = `${d.type} connected on ${new URL(tab.url).hostname} — reading assignments…`;
     // The worker registers the scripts on storage change; inject now for this tab.
     await new Promise((r) => setTimeout(r, 400));
@@ -2411,11 +2407,6 @@ document.querySelectorAll(".mood").forEach((btn) =>
 $("mode-select").addEventListener("change", async (e) => {
   await FA.store.setSettings({ mode: e.target.value });
   settings.mode = e.target.value;
-});
-$("source-select").addEventListener("change", async (e) => {
-  await FA.store.setSettings({ dataSource: e.target.value });
-  await loadAssignments();
-  await refreshAll();
 });
 $("dev-toggle").addEventListener("change", async (e) => {
   await FA.store.setSettings({ devMode: e.target.checked });

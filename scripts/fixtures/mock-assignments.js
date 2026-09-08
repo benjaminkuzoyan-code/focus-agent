@@ -1,5 +1,7 @@
 /**
- * adapters/mock.js - Fake portal data for building/testing all summer.
+ * scripts/fixtures/mock-assignments.js - TEST FIXTURE ONLY (not shipped).
+ * Fake portal data for the jsdom smoke tests; the extension itself never
+ * shows demo data any more — no portal means an empty list with instructions.
  *
  * The default data source until school starts. Shaped by makeAssignment()
  * like every real adapter, so the rest of the app cannot tell the

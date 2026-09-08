@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Focus Agent",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "Smart Start: one tap opens what you need, parks what you don't, starts the clock, and your coach is already talking. Reads your school portal.",
   "icons": {
     "16": "icons/icon16.png",
@@ -25,8 +25,7 @@
         "https://*.blackbaud.com/*",
         "https://*.myschoolapp.com/*",
         "https://*.instructure.com/*",
-        "https://classroom.google.com/*",
-        "http://localhost:8000/*"
+        "https://classroom.google.com/*"
       ],
       "js": [
         "adapters/schema.js",
@@ -34,8 +33,6 @@
         "adapters/blackbaud.js",
         "adapters/canvas.js",
         "adapters/classroom.js",
-        "adapters/mock.js",
-        "adapters/demo.js",
         "lib/priority.js",
         "lib/snapshot.js",
         "lib/ai.js",
@@ -60,7 +57,6 @@
     "contextMenus"
   ],
   "host_permissions": [
-    "http://localhost:8000/*",
     "http://127.0.0.1:8000/*",
     "https://www.googleapis.com/*",
     "https://docs.googleapis.com/*",

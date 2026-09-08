@@ -150,17 +150,17 @@ chrome.runtime.onInstalled.addListener((details) => {
   syncPortalScripts();
   ensureContextMenu();
   // (The cached assignment list is deliberately KEPT across reloads — a
-  // slightly stale list beats demo data while portal tabs reconnect.)
+  // slightly stale list beats an empty panel while portal tabs reconnect.)
   // Re-inject content scripts into portal tabs that are already open.
   // Chrome drops them on reload ("Receiving end does not exist"), which
-  // otherwise leaves the panel on demo data until every tab is refreshed.
+  // otherwise leaves the panel empty until every tab is refreshed.
   reinjectContentScripts();
   // Poll commitments every minute so receipts arrive on time.
   chrome.alarms.create(COMMITMENT_ALARM, { periodInMinutes: 1 });
 });
 
-const PORTAL_MATCHES = ["https://*.blackbaud.com/*", "https://*.myschoolapp.com/*", "https://*.instructure.com/*", "https://classroom.google.com/*", "http://localhost:8000/*"];
-const CONTENT_JS = ["adapters/schema.js", "adapters/detect.js", "adapters/blackbaud.js", "adapters/canvas.js", "adapters/classroom.js", "adapters/mock.js", "adapters/demo.js", "lib/priority.js", "lib/snapshot.js", "lib/ai.js", "content.js", "overlay/coach-overlay.js"];
+const PORTAL_MATCHES = ["https://*.blackbaud.com/*", "https://*.myschoolapp.com/*", "https://*.instructure.com/*", "https://classroom.google.com/*"];
+const CONTENT_JS = ["adapters/schema.js", "adapters/detect.js", "adapters/blackbaud.js", "adapters/canvas.js", "adapters/classroom.js", "lib/priority.js", "lib/snapshot.js", "lib/ai.js", "content.js", "overlay/coach-overlay.js"];
 const CONTENT_CSS = ["overlay/coach-overlay.css"];
 
 async function reinjectContentScripts() {

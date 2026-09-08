@@ -1,7 +1,7 @@
 """Focus Agent coach bridge.
 
 One local server, two jobs:
-  - serves the project statically (so the demo portal works as before)
+  - answers /health and /voice/local (no static file serving)
   - POST /coach: runs the real Claude brain via `claude -p` (headless
     Claude Code, which uses the student's existing login -- NO API key needed)
 
@@ -723,7 +723,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "stale": mtime > self.STARTED,   # file edited since launch → restart me
                 "methods": sorted(BUILDERS.keys()),
             })
-        return super().do_GET()
+        return self._send_json(404, {"error": "unknown endpoint"})
 
     def do_POST(self):
         if self.path != "/coach":
@@ -767,7 +767,6 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"Focus Agent bridge on http://127.0.0.1:{PORT}")
-    print(f"  demo portal : http://localhost:{PORT}/demo-portal/")
     print(f"  coach brain : claude -p (headless, model={MODEL})")
     # ThreadingHTTPServer matters: brain calls take 15s+, and a single-threaded
     # server would queue the panel's 1.5s health checks behind them.

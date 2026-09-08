@@ -28,7 +28,7 @@ feature can live without a permission, the permission goes, not the feature.
 | `notifications` | check-ins, receipts, distraction nudges | "Shows the focus reminders and check-ins the user configures." | keep |
 | `sidePanel` | the main coach UI | "The extension's main interface lives in Chrome's side panel." | keep |
 | Host: `*.myschoolapp.com`, `*.blackbaud.com`, `*.instructure.com`, `classroom.google.com` | portal adapters + coach overlay | "Reads the user's own assignment list from their school portal, on-device, to power prioritization and coaching. Nothing is transmitted off the device." | keep — the core single purpose |
-| Host: `http://localhost:8000/*` + `adapters/demo.js` + `demo-portal/` | DEV ONLY | — | **STRIP at packaging** (scripts/package-store.sh does this) |
+| ~~demo portal~~ removed 2026-09-07 | — | — | (nothing to strip; bridge host `127.0.0.1:8000` still dev-only — package-store.sh does this) |
 
 Single-purpose statement (store requires one): "Focus Agent helps students
 see, prioritize, and actually start their schoolwork by reading their own

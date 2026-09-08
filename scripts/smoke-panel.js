@@ -70,6 +70,16 @@ const dom = new JSDOM(html, {
 });
 const { window } = dom;
 
+// Seed the assignment cache from the test fixture (the extension itself has
+// no demo data any more): schema + fixture into the window, run the fixture,
+// then pretend the portal cached it a moment ago.
+window.eval(fs.readFileSync(path.join(ROOT, "adapters/schema.js"), "utf8"));
+window.eval(fs.readFileSync(path.join(ROOT, "scripts/fixtures/mock-assignments.js"), "utf8"));
+const seeded = (async () => {
+  const items = await window.FA.adapters.mock.fetchAssignments();
+  store.assignmentsCache = { items, fetchedAt: Date.now(), source: "blackbaud" };
+})();
+
 // Load scripts in the order panel.html declares them.
 const srcs = [...dom.window.document.querySelectorAll("script[src]")].map((s) => s.getAttribute("src"));
 for (const src of srcs) {
@@ -86,13 +96,14 @@ const $ = (id) => window.document.getElementById(id);
 const visible = (id) => $(`view-${id}`).classList.contains("active");
 
 (async () => {
-  await sleep(2500); // boot: initCoach health check times out at 1.5s, then loads mock data
+  await seeded;
+  await sleep(2500); // boot: initCoach health check times out at 1.5s, then loads the cached fixture
 
   const results = [];
   const check = (name, ok, extra = "") => results.push(`${ok ? "✓" : "✗"} ${name}${extra ? " — " + extra : ""}`);
 
   const cards = window.document.querySelectorAll("#today-list .card");
-  check("list renders mock assignments", cards.length > 0, `${cards.length} cards`);
+  check("list renders cached assignments (fixture)", cards.length > 0, `${cards.length} cards`);
   if (!cards.length) {
     console.log(results.join("\n"));
     console.log("\nERRORS:\n" + (errors.join("\n\n") || "(none captured — check script load order)"));
@@ -248,7 +259,7 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   const cardsAll = [...window.document.querySelectorAll("#today-list .card")];
   const titles = cardsAll.map((c) => c.querySelector(".card-title").textContent);
   const testIdx = titles.findIndex((x) => /test|quiz|exam/i.test(x));
-  check("mock data has a test to study for", testIdx >= 0, titles.join(" | ").slice(0, 80));
+  check("fixture has a test to study for", testIdx >= 0, titles.join(" | ").slice(0, 80));
   cardsAll[testIdx >= 0 ? testIdx : 0].querySelector(".start").click();
   await sleep(600);
   check("study chips visible for a test", window.document.body.classList.contains("studying") && window.getComputedStyle(window.document.querySelector('[data-cmd="quiz"]')).display !== "none");

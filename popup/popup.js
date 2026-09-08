@@ -7,15 +7,8 @@
 const $ = (id) => document.getElementById(id);
 
 async function loadRanked() {
-  const settings = await FA.store.getSettings();
-
-  let assignments = [];
-  if (settings.dataSource === "mock") {
-    assignments = await FA.adapters.mock.fetchAssignments();
-  } else {
-    const cache = await FA.store.getCachedAssignments();
-    assignments = cache?.items?.length ? cache.items : await FA.adapters.mock.fetchAssignments();
-  }
+  const cache = await FA.store.getCachedAssignments();
+  const assignments = cache?.items || [];
 
   const [meta, sessions] = await Promise.all([FA.store.getMeta(), FA.store.getSessions()]);
   $("streak").textContent = `🔥 ${FA.computeStreak(sessions)}`;
@@ -45,8 +38,8 @@ async function openPanel(startId) {
       $("next-meta").textContent = `${assignment.course} · ~${assignment.estMin} min — ${reason}`;
       $("start").disabled = false;
     } else {
-      $("next-title").textContent = "Nothing pending 🏖️";
-      $("next-meta").textContent = prefix + reason;
+      $("next-title").textContent = ranked.length ? "Nothing pending 🏖️" : "No portal yet";
+      $("next-meta").textContent = ranked.length ? prefix + reason : "Open your school portal (myPoly, Canvas…) in a tab, then open the panel.";
       $("start").disabled = true;
     }
   };
