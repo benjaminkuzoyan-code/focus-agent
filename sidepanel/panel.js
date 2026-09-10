@@ -127,6 +127,8 @@ async function loadAssignments(retried = false) {
   settings = await FA.store.getSettings();
   $("mode-select").value = settings.mode || "tutor";
   $("dev-toggle").checked = Boolean(settings.devMode);
+  $("bridge-url").value = settings.bridgeUrl || "";
+  $("bridge-token").value = settings.bridgeToken || "";
   $("nightly-toggle").checked = Boolean(settings.nightlyPlan);
   $("autopilot-toggle").checked = Boolean(settings.autopilot);
   $("auto-done-toggle").checked = Boolean(settings.autoDone);
@@ -1706,7 +1708,7 @@ $("voice-import-guide").addEventListener("click", async () => {
   const note = $("voice-guide-note");
   note.textContent = "importing…";
   try {
-    const res = await fetch("http://127.0.0.1:8000/voice/local");
+    const res = await fetch(`${(await FA.bridgeConfig()).url}/voice/local`);
     const data = await res.json();
     let n = 0;
     if (data.guide) {
@@ -2434,6 +2436,17 @@ $("auto-done-toggle").addEventListener("change", async (e) => {
   await FA.store.setSettings({ autoDone: e.target.checked });
   settings.autoDone = e.target.checked;
 });
+// Coach server + access code: save, then re-probe the bridge so the badge is honest.
+for (const [id, key] of [["bridge-url", "bridgeUrl"], ["bridge-token", "bridgeToken"]]) {
+  $(id).addEventListener("change", async (e) => {
+    const value = e.target.value.trim();
+    await FA.store.setSettings({ [key]: value });
+    settings[key] = value;
+    $("brain-badge").textContent = "🧠 checking…";
+    await FA.initCoach();
+    renderBrainBadge();
+  });
+}
 $("commit-btn").addEventListener("click", addCommitment);
 $("chat-send").addEventListener("click", () => sendChat());
 $("chat-input").addEventListener("keydown", (e) => {
@@ -2520,18 +2533,32 @@ async function showPendingDone(pd) {
 /* ------------------------------------------------------------------ *
  * Boot
  * ------------------------------------------------------------------ */
-(async () => {
-  const brain = await FA.initCoach();
-  const stale = brain === "claude" && FA.bridgeHealth?.stale;
-  const engine = FA.bridgeHealth?.engine === "api" ? "API" : "bridge";
-  $("brain-badge").textContent = stale ? "🧠 bridge needs restart" : brain === "claude" ? `🧠 Claude (${engine})` : "⚙️ rules";
-  $("brain-badge").title = stale
+/** The brain badge under ⚙: which coach is answering, and why if it isn't Claude. */
+function renderBrainBadge() {
+  const brain = FA.coachBrain;
+  const h = FA.bridgeHealth || {};
+  const stale = brain === "claude" && h.stale;
+  const engine = h.engine === "api" ? "API" : "bridge";
+  const badge = $("brain-badge");
+  if (h.badToken) {
+    badge.textContent = "🔒 wrong access code";
+    badge.title = "The coach server answered but didn't accept the access code — check ⚙ → access code.";
+    return;
+  }
+  badge.textContent = stale ? "🧠 bridge needs restart" : brain === "claude" ? `🧠 Claude (${engine}${h.hosted ? ", hosted" : ""})` : "⚙️ rules";
+  badge.title = stale
     ? "The bridge's code changed since it was started — its prompts are out of date. Ctrl-C it and run: python3 bridge/coach_server.py"
     : brain === "claude"
       ? engine === "API"
-        ? `Real Claude brain over the API (${FA.bridgeHealth?.model || "claude"})`
+        ? `Real Claude brain over the API (${h.model || "claude"})${h.hosted ? " on Ben's server" : ""}`
         : "Real Claude brain via headless Claude Code — slow. Put an API key in ~/.focus-agent/api_key and restart the bridge for the fast engine."
-      : "Rule-based coach — start the bridge for the real brain: python3 bridge/coach_server.py";
+      : "Rule-based coach — no coach server reachable. ⚙ → coach server: paste the address + access code from Ben, or run python3 bridge/coach_server.py on this computer.";
+}
+
+(async () => {
+  const brain = await FA.initCoach();
+  const stale = brain === "claude" && FA.bridgeHealth?.stale;
+  renderBrainBadge();
   if (stale) {
     sourceNotice = "⚠️ The coach bridge is running old code — restart it (Ctrl-C, then python3 bridge/coach_server.py) or new features won't reach the brain.";
     $("forecast-headline").textContent = sourceNotice;

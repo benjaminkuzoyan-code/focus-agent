@@ -658,6 +658,11 @@ body:not(.dev) .dev { display: none !important; }
   background: var(--glass); border: 1px solid var(--edge);
 }
 .settings-row input[type="checkbox"] { accent-color: #818cf8; width: 16px; height: 16px; }
+.settings-row input[type="text"], .settings-row input[type="password"] {
+  width: 150px; background: var(--glass); border: 1px solid var(--edge); color: var(--ink);
+  border-radius: 8px; padding: 5px 8px; font-size: 12px; outline: none;
+}
+.settings-row input[type="text"]:focus, .settings-row input[type="password"]:focus { border-color: rgba(129, 140, 248, 0.55); }
 
 /* ---------- Ramp chunk chips ---------- */
 .chunk-row { display: flex; align-items: center; gap: 8px; margin: -4px 0 10px; flex-wrap: wrap; }

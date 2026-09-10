@@ -15,6 +15,13 @@ One local server, two jobs:
 
 Run from the project root:
     python3 bridge/coach_server.py        # http://localhost:8000
+    python3 bridge/coach_server.py token alice   # mint an access code for a friend
+
+Hosted (so friends can use it while Ben's laptop is closed): see deploy/README.md.
+Set FA_HOST=0.0.0.0 and give every friend an access code (FA_TOKENS or
+~/.focus-agent/tokens); the extension sends it as X-FA-Token. Each code has a
+daily call cap (FA_DAILY_CAP, default 300) so one runaway install can't burn
+the key.
 
 The extension's ClaudeCoach calls POST /coach; if this server isn't
 running, the extension silently falls back to the built-in rule-based
@@ -26,12 +33,19 @@ import base64
 import json
 import os
 import re
+import secrets
 import subprocess
+import sys
+import threading
 import time
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
-PORT = 8000
+HOST = os.environ.get("FA_HOST", "127.0.0.1")           # 0.0.0.0 when hosted
+PORT = int(os.environ.get("PORT", os.environ.get("FA_PORT", "8000")))
+HOSTED = HOST != "127.0.0.1"
+DAILY_CAP = int(os.environ.get("FA_DAILY_CAP", "300"))  # coach calls per access code per UTC day
+TOKENS_FILE = Path.home() / ".focus-agent" / "tokens"
 MODEL = "opus"         # claude-cli engine: coaching quality matters more than speed
 CLAUDE_TIMEOUT = 150   # seconds; headless cold starts take a few seconds alone
 
@@ -60,6 +74,51 @@ def _api_key() -> str:
 
 
 ENGINE = "api" if _api_key() else "claude-cli"
+
+
+def _load_tokens():
+    """{access code: name}. From FA_TOKENS="alice:code1,bob:code2" and/or
+    ~/.focus-agent/tokens (one `name code` per line). Empty + local = open."""
+    out = {}
+    for pair in os.environ.get("FA_TOKENS", "").split(","):
+        if ":" in pair:
+            name, tok = pair.split(":", 1)
+            if tok.strip():
+                out[tok.strip()] = name.strip()
+    try:
+        for line in TOKENS_FILE.read_text().splitlines():
+            parts = line.split()
+            if len(parts) == 2 and not line.lstrip().startswith("#"):
+                out[parts[1]] = parts[0]
+    except OSError:
+        pass
+    return out
+
+
+TOKENS = _load_tokens()
+_usage = {}          # (name, utc day) -> calls today
+_usage_lock = threading.Lock()
+
+
+def _count_call(name: str) -> bool:
+    """True if this call is within the caller's daily cap."""
+    key = (name, time.strftime("%Y-%m-%d", time.gmtime()))
+    with _usage_lock:
+        n = _usage.get(key, 0) + 1
+        _usage[key] = n
+        if len(_usage) > 5000:  # never grows past a few days of names
+            for k in [k for k in _usage if k[1] != key[1]]:
+                del _usage[k]
+    return n <= DAILY_CAP
+
+
+def mint_token(name: str) -> str:
+    """Append a fresh access code for `name` to the tokens file and return it."""
+    tok = secrets.token_urlsafe(18)
+    TOKENS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with TOKENS_FILE.open("a") as f:
+        f.write(f"{name} {tok}\n")
+    return tok
 
 COACH_IDENTITY = (
     "You're the coach inside Focus Agent, a Chrome extension a high-school student "
@@ -762,7 +821,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-FA-Token")
         self.send_header("Content-Length", str(len(body)))
         try:
             self.end_headers()
@@ -774,8 +833,25 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-FA-Token")
         self.end_headers()
+
+    def _who(self):
+        """Name behind the request's access code; 'local' when auth is off
+        (no codes configured AND bound to loopback); None = not allowed."""
+        tok = (self.headers.get("X-FA-Token") or "").strip()
+        if not tok:
+            auth = self.headers.get("Authorization") or ""
+            if auth.lower().startswith("bearer "):
+                tok = auth[7:].strip()
+        if tok and tok in TOKENS:
+            return TOKENS[tok]
+        if not TOKENS and not HOSTED:
+            return "local"
+        return None
+
+    def _is_loopback(self):
+        return self.client_address[0] in ("127.0.0.1", "::1")
 
     # The bridge is a long-lived process: edits to this file do nothing until
     # it's restarted. /health says so, and the panel shows it.
@@ -786,6 +862,9 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/voice/local":
             # The student's own style guide + sample essays on this machine
             # (~/.claude/skills/essay). Read-only; nothing is uploaded anywhere.
+            # Loopback only: a hosted bridge must never serve its owner's files.
+            if not self._is_loopback():
+                return self._send_json(403, {"error": "voice import only works with a bridge on this computer"})
             base = Path.home() / ".claude" / "skills" / "essay"
             out = {"guide": "", "samples": []}
             try:
@@ -805,6 +884,7 @@ class Handler(SimpleHTTPRequestHandler):
                 mtime = 0
             return self._send_json(200, {
                 "ok": True, "brain": "claude", "engine": ENGINE,
+                "hosted": HOSTED, "auth": bool(TOKENS), "who": self._who(),
                 "model": API_MODEL if ENGINE == "api" else MODEL,
                 "started": int(self.STARTED), "sourceMtime": int(mtime),
                 "stale": mtime > self.STARTED,   # file edited since launch → restart me
@@ -815,6 +895,13 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path != "/coach":
             return self._send_json(404, {"error": "unknown endpoint"})
+        who = self._who()
+        if who is None:
+            return self._send_json(401, {"error": "access code missing or wrong (⚙ → coach server)"})
+        if not _count_call(who):
+            return self._send_json(429, {"error": f"daily limit reached ({DAILY_CAP} coach calls) — resets at midnight UTC"})
+        t0 = time.time()
+        method = "?"
         try:
             length = int(self.headers.get("Content-Length", 0))
             req = json.loads(self.rfile.read(length))
@@ -838,13 +925,17 @@ class Handler(SimpleHTTPRequestHandler):
             prompt, required = builder(payload)
             system = _system(payload)
             if method == "chat":
-                return self._send_json(200, {"ok": True, "result": {"reply": ask_claude_text(prompt, system)}})
+                reply = ask_claude_text(prompt, system)
+                print(f"[coach] {who} chat {ENGINE} {int((time.time() - t0) * 1000)}ms ok", flush=True)
+                return self._send_json(200, {"ok": True, "result": {"reply": reply}})
             result = ask_claude(prompt, system)
             missing = [k for k in required if k not in result]
             if missing:
                 return self._send_json(502, {"error": f"reply missing keys: {missing}"})
+            print(f"[coach] {who} {method} {ENGINE} {int((time.time() - t0) * 1000)}ms ok", flush=True)
             return self._send_json(200, {"ok": True, "result": result})
         except Exception as e:  # noqa: BLE001 -- report anything to the client
+            print(f"[coach] {who} {method} {ENGINE} {int((time.time() - t0) * 1000)}ms ERR {str(e)[:120]}", flush=True)
             return self._send_json(500, {"error": str(e)[:300]})
 
     def log_message(self, fmt, *args):
@@ -854,7 +945,18 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"Focus Agent bridge on http://127.0.0.1:{PORT}")
+    if len(sys.argv) >= 3 and sys.argv[1] == "token":
+        name = sys.argv[2]
+        tok = mint_token(name)
+        print(f"access code for {name}: {tok}")
+        print(f"(saved to {TOKENS_FILE}; restart the bridge to load it. Hosted on Fly? add it to FA_TOKENS instead.)")
+        sys.exit(0)
+    if HOSTED and not TOKENS:
+        sys.exit("Refusing to start: FA_HOST is not loopback but no access codes are configured (FA_TOKENS or ~/.focus-agent/tokens).")
+    if HOSTED and ENGINE != "api":
+        print("WARNING: hosted without an API key -- claude -p has no login on a server; set ANTHROPIC_API_KEY.", flush=True)
+    print(f"Focus Agent bridge on http://{HOST}:{PORT}  (auth: {len(TOKENS)} access code(s), cap {DAILY_CAP}/day each)" if TOKENS
+          else f"Focus Agent bridge on http://{HOST}:{PORT}  (open: local use only)", flush=True)
     if ENGINE == "api":
         print(f"  coach brain : Claude API (model={API_MODEL}, effort={API_EFFORT})")
     else:
@@ -862,4 +964,4 @@ if __name__ == "__main__":
         print(f"                put one in {API_KEY_FILE} (or export ANTHROPIC_API_KEY) for the fast engine")
     # ThreadingHTTPServer matters: brain calls take 15s+, and a single-threaded
     # server would queue the panel's 1.5s health checks behind them.
-    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

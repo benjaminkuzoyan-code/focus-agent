@@ -93,7 +93,9 @@ Cut in v0.7: boss battles, the Quests tab, the Panic tab (now the time chips), t
 - **API** (fast, the real thing): put your Anthropic API key in `~/.focus-agent/api_key` (one line) or export `ANTHROPIC_API_KEY`, and `pip3 install anthropic` once. Replies in a few seconds; the coach's identity and help policy ride in a real system prompt. `FA_EFFORT=high` for deeper, slower answers (default `medium`); `FA_API_MODEL` to change the model.
 - **claude-cli** (fallback, no key): headless `claude -p` with your Claude Code login. 10-60s per call and it hit the 150s timeout on ~8% of calls in the log — use it only until the key lands.
 
-Restart the bridge after editing it — the panel shows **🧠 bridge needs restart** when its code is stale, and ⚙ → the brain badge says which engine is live. Friends' machines don't have a bridge: without one the coach is rules-only until there's a hosted backend.
+Restart the bridge after editing it — the panel shows **🧠 bridge needs restart** when its code is stale, and ⚙ → the brain badge says which engine is live.
+
+**Friends:** their machines don't have a bridge, so host one — `deploy/README.md` has the Fly.io and VPS recipes. Each friend gets an access code (`python3 bridge/coach_server.py token <name>`, or `FA_TOKENS=name:code,…` on the server) and pastes the server address + code into ⚙ → coach server. Codes are capped at `FA_DAILY_CAP` calls a day. The API key stays on the server.
 
 **Coach voice:** casual, direct, like a sharp older friend — set in `COACH_IDENTITY` in `bridge/coach_server.py`. The tutor policy holds back only the final answer to graded work and says so in one line; answer mode and developer mode hand things over, including again after a cleared chat. Your writing-voice profile applies only to text the coach writes *for* you, never to how it chats.
 

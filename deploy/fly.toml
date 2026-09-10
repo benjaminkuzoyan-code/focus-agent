@@ -1,0 +1,23 @@
+# fly.io config for the coach bridge. `fly launch --copy-config --no-deploy`
+# from the repo root (with this file copied there), then set secrets — see deploy/README.md.
+app = "focus-agent-bridge"   # change if the name is taken
+primary_region = "lax"       # closest to Pasadena
+
+[build]
+  dockerfile = "deploy/Dockerfile"
+
+[env]
+  FA_HOST = "0.0.0.0"
+  PORT = "8000"
+  FA_DAILY_CAP = "300"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"    # sleeps when nobody's using it (free-tier friendly)
+  auto_start_machines = true     # wakes on the first request (~1s)
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
