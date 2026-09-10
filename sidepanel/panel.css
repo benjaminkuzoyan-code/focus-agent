@@ -379,6 +379,13 @@ select {
   transition: background 0.2s, color 0.2s;
 }
 .chat-chip:hover { background: var(--glass-strong); color: var(--ink); }
+/* The chip row stays short: a few primary chips + ⋯. Secondary chips only
+   render once ⋯ is tapped (the row gets .expanded). */
+.chat-chips:not(.expanded) .chat-chip.secondary { display: none; }
+.chat-chip.more { padding: 6px 10px; font-weight: 700; letter-spacing: 1px; min-width: 36px; }
+.chat-chips.expanded .chat-chip.more { background: var(--glass-strong); color: var(--ink); }
+.chat-chip.secondary-lite { opacity: 0.6; }
+.chat-chip.secondary-lite:hover { opacity: 1; }
 .chat-input-row { display: flex; gap: 7px; padding-top: 4px; }
 #chat-input {
   flex: 1; background: var(--glass); border: 1px solid var(--edge);

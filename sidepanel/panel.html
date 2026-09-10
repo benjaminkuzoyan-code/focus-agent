@@ -121,25 +121,28 @@
 
       <!-- The coach, scoped to THIS assignment -->
       <div id="work-messages" class="chat-messages work-messages"></div>
+      <!-- Three chips you actually reach for (four on a test), everything else behind ⋯ -->
       <div id="work-chips" class="chat-chips">
+        <button class="chat-chip" data-cmd="stuck" title="Smallest next thing you can do on the current step">I'm stuck</button>
         <button class="chat-chip" data-cmd="explain" title="What is the teacher actually asking for?">explain</button>
-        <button class="chat-chip" data-cmd="breakdown" title="Redo the checklist from the instructions">break it down</button>
         <button class="chat-chip" data-cmd="precheck" title="Tutor feedback on your draft — pointers, never rewrites">check my draft</button>
-        <button class="chat-chip" data-cmd="stuck">I'm stuck</button>
-        <button class="chat-chip" data-cmd="more5">5 more minutes</button>
-        <button class="chat-chip" data-cmd="format" title="Restyle your Google Doc (MLA: Times 12, double-spaced, 1&quot; margins). Never changes your words.">format my doc</button>
         <!-- study mode: shown for tests/quizzes (body.studying) -->
         <button class="chat-chip study" data-cmd="quiz" title="The coach asks one question at a time from your files and grades your answers">quiz me</button>
-        <button class="chat-chip study" data-cmd="flashcards" title="Flashcards from your files + highlights; copy them straight into Quizlet">flashcards</button>
-        <button class="chat-chip study" data-cmd="studyplan" title="Spread the studying over the days until the test — as checklist steps">study plan</button>
-        <button class="chat-chip" data-cmd="clear" title="Clear this assignment's chat">clear chat</button>
+        <button class="chat-chip more" data-cmd="more" title="More">⋯</button>
+        <!-- behind ⋯ -->
+        <button class="chat-chip secondary" data-cmd="breakdown" title="Redo the checklist from the instructions">break it down</button>
+        <button class="chat-chip secondary" data-cmd="more5">5 more minutes</button>
+        <button class="chat-chip secondary" data-cmd="format" title="Restyle your Google Doc (MLA: Times 12, double-spaced, 1&quot; margins). Never changes your words.">format my doc</button>
+        <button class="chat-chip secondary study" data-cmd="flashcards" title="Flashcards from your files + highlights; copy them straight into Quizlet">flashcards</button>
+        <button class="chat-chip secondary study" data-cmd="studyplan" title="Spread the studying over the days until the test — as checklist steps">study plan</button>
+        <button class="chat-chip secondary" data-cmd="clear" title="Clear this assignment's chat">clear chat</button>
         <!-- Ben's build only (settings → developer mode) -->
-        <button class="chat-chip dev" data-cmd="dev-write" title="Dev: the coach writes the current step">write this step</button>
-        <button class="chat-chip dev" data-cmd="dev-answer" title="Dev: the coach answers the questions">answer these</button>
-        <button class="chat-chip dev" data-cmd="dev-photo" title="Dev: photo of paper work → steps checked + feedback">📷 photo of my work</button>
-        <button class="chat-chip dev" data-cmd="dev-complete" title="Dev: tick it complete in myPoly">mark it complete</button>
-        <button class="chat-chip dev" data-cmd="dev-edit" title="Dev: tell the coach what to change in the doc — it edits in place">edit my doc…</button>
-        <button class="chat-chip dev" data-cmd="dev-autopilot" title="Dev: open everything, make the doc, write every step, check them off">🚀 autopilot</button>
+        <button class="chat-chip secondary dev" data-cmd="dev-write" title="Dev: the coach writes the current step">write this step</button>
+        <button class="chat-chip secondary dev" data-cmd="dev-answer" title="Dev: the coach answers the questions">answer these</button>
+        <button class="chat-chip secondary dev" data-cmd="dev-photo" title="Dev: photo of paper work → steps checked + feedback">📷 photo of my work</button>
+        <button class="chat-chip secondary dev" data-cmd="dev-complete" title="Dev: tick it complete in myPoly">mark it complete</button>
+        <button class="chat-chip secondary dev" data-cmd="dev-edit" title="Dev: tell the coach what to change in the doc — it edits in place">edit my doc…</button>
+        <button class="chat-chip secondary dev" data-cmd="dev-autopilot" title="Dev: open everything, make the doc, write every step, check them off">🚀 autopilot</button>
       </div>
       <input type="file" id="photo-input" accept="image/*" capture="environment" class="hidden" />
       <div class="chat-input-row">
@@ -219,11 +222,10 @@
       <p class="muted small">Not tied to one assignment — your week, your grades, what to do next. It knows your portal, your pace and your files. Clears when you Smart Start something new.</p>
       <div id="chat-messages" class="chat-messages full-chat"></div>
       <div class="chat-chips">
-        <button class="chat-chip" data-msg="Replan my week — what should I move around?">replan my week</button>
-        <button class="chat-chip" data-msg="Why should I start with the assignment you picked?">why this first?</button>
         <button class="chat-chip" data-msg="What's due in the next 3 days, in order?">what's due soon</button>
-        <button class="chat-chip" data-msg="Quiz me on what I just studied.">quiz me</button>
-        <button class="chat-chip" id="chat-clear">clear</button>
+        <button class="chat-chip" data-msg="Why should I start with the assignment you picked?">why this first?</button>
+        <button class="chat-chip" data-msg="Replan my week — what should I move around?">replan my week</button>
+        <button class="chat-chip secondary-lite" id="chat-clear" title="Clear this chat">clear</button>
       </div>
       <div class="chat-input-row">
         <input type="text" id="chat-input" placeholder="talk to your coach…" autocomplete="off" />

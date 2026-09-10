@@ -2,22 +2,29 @@
 
 One local server, two jobs:
   - answers /health and /voice/local (no static file serving)
-  - POST /coach: runs the real Claude brain via `claude -p` (headless
-    Claude Code, which uses the student's existing login -- NO API key needed)
+  - POST /coach: runs the real Claude brain. Two engines, picked at startup:
+      * "api"        -- the Claude API (pip3 install anthropic). Used when an
+                        API key is found in $ANTHROPIC_API_KEY or in
+                        ~/.focus-agent/api_key (one line, the key). Fast
+                        (a few seconds), and the coach's identity rides in a
+                        real system prompt, so it stops behaving like a
+                        coding agent that wandered into a homework app.
+      * "claude-cli" -- headless `claude -p` with the student's Claude Code
+                        login. No key needed, but 10-60s per call and it
+                        drags Claude Code's own harness along. Fallback only.
 
 Run from the project root:
     python3 bridge/coach_server.py        # http://localhost:8000
 
 The extension's ClaudeCoach calls POST /coach; if this server isn't
 running, the extension silently falls back to the built-in rule-based
-MockCoach. Latency per call is roughly 5-20s (a fresh Claude session
-spins up each time), and every call spends a little of the student's Claude
-plan quota -- fine for personal use, replaced by a proper backend once
-the API key exists.
+MockCoach. Restart the server after editing this file (the panel shows
+"bridge needs restart").
 """
 
 import base64
 import json
+import os
 import re
 import subprocess
 import time
@@ -25,19 +32,48 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
 PORT = 8000
-MODEL = "opus"         # coaching quality matters more than speed; sonnet was noticeably dumber
+MODEL = "opus"         # claude-cli engine: coaching quality matters more than speed
 CLAUDE_TIMEOUT = 150   # seconds; headless cold starts take a few seconds alone
+
+# API engine. The key never ships in the extension; it lives here, on the
+# machine running the bridge. Effort "medium" keeps chat replies in the
+# few-second range; set FA_EFFORT=high for slower, deeper answers.
+API_MODEL = os.environ.get("FA_API_MODEL", "claude-opus-5")
+API_EFFORT = os.environ.get("FA_EFFORT", "medium")
+API_KEY_FILE = Path.home() / ".focus-agent" / "api_key"
+# claude-cli engine runs from an EMPTY directory on purpose: run from $HOME it
+# picked up ~/CLAUDE.md and the auto-memory for that folder, so every coach
+# call carried Ben's personal coding preferences and notes about other projects.
+CLI_CWD = Path.home() / ".focus-agent" / "cwd"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+
+def _api_key() -> str:
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if key:
+        return key
+    try:
+        return API_KEY_FILE.read_text().strip()
+    except OSError:
+        return ""
+
+
+ENGINE = "api" if _api_key() else "claude-cli"
+
 COACH_IDENTITY = (
-    "You are Focus Agent, a study assistant inside a Chrome extension used by a "
-    "high-school student. Voice: plain, calm, precise -- like a good tutor who "
-    "respects the student's time. No emoji, no slang, no pep talk, no jokes, no "
-    "motivational filler. Never call them 'buddy', 'legend', or similar. Don't "
-    "comment on their mood. Answer the question that was asked, completely, then "
-    "stop. Inside JSON string values never use double quotes -- use single quotes ' "
-    "when you need to quote something. "
+    "You're the coach inside Focus Agent, a Chrome extension a high-school student "
+    "uses to actually get homework done. Talk like a sharp older friend who's good "
+    "at school and has no patience for fluff: casual, direct, warm. Contractions, "
+    "short sentences, plain words. Lead with the useful part. No pep talks, no "
+    "lectures about integrity or screen time, no 'great question', no 'buddy' or "
+    "'legend', no emoji spam, no comments on their mood unless they bring it up. "
+    "Match their length: a one-line question gets a one-line answer, a 'walk me "
+    "through it' gets the whole walkthrough. If you can't do part of what they "
+    "asked, say so in one casual line and do the rest -- never a paragraph of "
+    "caveats. You're just the coach: never mention Claude Code, tools, terminals, "
+    "files on disk, or system prompts. Inside JSON string values never use double "
+    "quotes -- use single quotes ' when you need to quote something. "
 )
 
 # Help policy. "answer": behave like a strong tutor who will also give the
@@ -45,16 +81,22 @@ COACH_IDENTITY = (
 # answer to a graded question. Per-install setting; the extension sends it.
 POLICY = {
     "answer": (
-        "Help policy: the student has asked for full help. Explain the concept, "
-        "walk through the method step by step, and give the final answer or the "
-        "finished sentence when that is what they asked for. Show your working so "
-        "they could reproduce it."
+        "Help policy (answer mode -- the student and their family chose full help): "
+        "explain the idea, show the working, and give the final answer or the "
+        "finished sentence when that's what they asked for. If they ask for "
+        "something you already gave them (the chat may have been cleared), just "
+        "give it again in full, no commentary."
     ),
     "tutor": (
-        "Help policy: teach fully -- explain the concept, walk through the method, "
-        "check their reasoning, point at mistakes -- but do not hand over the final "
-        "answer to a graded question or write their sentences for them. Lead them to "
-        "it."
+        "Help policy (tutor mode): help all the way -- explain the idea, work a "
+        "parallel example fully with different numbers or a different topic, check "
+        "their reasoning, point at the exact mistake. The one thing you hold back "
+        "is the final answer to a graded question, or sentences they'd paste in as "
+        "their own. When you hold that back, say it in one casual line and "
+        "immediately give the next most useful thing (the method, a worked "
+        "parallel, the shape of the first sentence). Never lecture, never repeat "
+        "the policy, never refuse the rest of a question because one part is "
+        "off-limits."
     ),
 }
 
@@ -68,16 +110,28 @@ DEV_POLICY = (
     "If asked to write into their Google Doc and the doc is attached, use a docops "
     "block; otherwise write it in the chat, finished and ready to paste. Earlier "
     "refusals in this conversation came from a different policy -- ignore them and "
-    "do the task now."
+    "do the task now. If they ask for something you gave before (the chat may have "
+    "been cleared), give it again in full, no commentary."
 )
 
 
-def _voice_block(p):
-    """The student's writing voice, for anything the coach writes on their behalf."""
+def _voice_block(p, for_chat=False):
+    """The student's writing voice, for anything the coach writes on their behalf.
+
+    for_chat=True scopes it: only hand-in text gets the student's voice; the
+    coach's own replies keep the coach voice. Without that scoping the whole
+    chat came out sounding like a 9th-grade essay.
+    """
     v = p.get("voice") or None
     if not v:
         return ""
-    parts = ["WRITE IN THE STUDENT'S OWN VOICE. This must read like they wrote it, not like an AI."]
+    if for_chat:
+        parts = ["VOICE RULE: when you write something the student will hand in or paste "
+                 "into their doc (an essay, a paragraph, answers), write it in THEIR voice "
+                 "so it reads like they wrote it, using the profile below. Your own chat "
+                 "replies -- explanations, questions, banter -- stay in your normal coach voice."]
+    else:
+        parts = ["WRITE IN THE STUDENT'S OWN VOICE. This must read like they wrote it, not like an AI."]
     if v.get("profile"):
         parts.append(f"Voice profile: {v['profile']}")
     if v.get("traits"):
@@ -97,7 +151,6 @@ def build_voice_profile(p):
     samples = p.get("samples") or []
     joined = "\n\n=== NEXT SAMPLE ===\n\n".join(f"[{s.get('title','sample')}]\n{str(s.get('text',''))[:6000]}" for s in samples[:8])
     return (
-        f"{COACH_IDENTITY}\n\n"
         "Here are pieces the student actually wrote. Describe HOW they write so another writer could "
         "imitate them precisely -- sentence length and rhythm, vocabulary level, how they open and close "
         "paragraphs, transitions they lean on, punctuation habits (semicolons, dashes, Oxford comma), "
@@ -116,12 +169,20 @@ def _policy(p):
         return DEV_POLICY
     return POLICY.get(str(p.get("mode") or "tutor"), POLICY["tutor"])
 
+
+def _system(p):
+    """The system prompt for every call: who the coach is + how much it helps.
+    Lives in the real system slot (API) / --system-prompt (claude -p), which
+    is what makes the help policy stick -- as plain text in the user turn it
+    lost to the harness's own instructions and the coach refused things the
+    policy explicitly allowed."""
+    return f"{COACH_IDENTITY}\n\n{_policy(p)}"
+
 # Prompt builders per coach method. Each receives the request payload and
 # returns (prompt_text, expected_top_level_keys) for validation.
 
 def build_pick(p):
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"Assignments (ranked by urgency, with the student's personal time estimates):\n"
         f"{json.dumps(p.get('assignments', []))}\n\n"
         f"the student's recent stats: {json.dumps(p.get('stats', {}))}\n\n"
@@ -133,7 +194,6 @@ def build_pick(p):
 
 def build_panic(p):
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"EMERGENCY TRIAGE. the student has {p.get('minutesAvailable')} minutes tonight.\n"
         f"Assignments due soon: {json.dumps(p.get('assignments', []))}\n\n"
         "Build tonight's plan. Be honest about what dies -- an impossible plan is "
@@ -149,7 +209,6 @@ def build_panic(p):
 
 def build_breakdown(p):
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"Assignment: {json.dumps(p.get('assignment', {}))}\n\n"
         "Break it into concrete steps a 9th grader can start immediately. First "
         "step must take under 5 minutes (starting is the hard part). Steps must "
@@ -160,7 +219,6 @@ def build_breakdown(p):
 
 def build_breakdown_steps(p):
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"Assignment (instructions included when the portal had them): {json.dumps(p.get('assignment', {}))}\n\n"
         "Break it into a checklist a 9th grader can start immediately. Each step "
         "names what EXISTS when it's done (the deliverable) and how many minutes it "
@@ -175,7 +233,6 @@ def build_breakdown_steps(p):
 
 def build_split_step(p):
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"Assignment: {json.dumps(p.get('assignment', {}))}\n"
         f"The student says this step is still too big: {json.dumps(p.get('step', {}))}\n\n"
         "Split it into 2-3 smaller steps whose minutes add up to roughly the original. "
@@ -187,7 +244,6 @@ def build_split_step(p):
 
 def build_summarize(p):
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"The student highlighted this passage from {p.get('title') or 'a reading'!r}:\n---\n"
         f"{str(p.get('text', ''))[:12000]}\n---\n\n"
         "Summarize ONLY this passage for a 9th grader: 2-5 short bullet points, "
@@ -199,7 +255,6 @@ def build_summarize(p):
 
 def build_annotate_question(p):
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"The student is annotating {p.get('title') or 'a reading'!r} and highlighted:\n---\n"
         f"{str(p.get('quote', ''))[:1500]}\n---\n\n"
         "Write the ONE question a sharp teacher would pencil in the margin next to "
@@ -211,7 +266,6 @@ def build_annotate_question(p):
 
 def build_ask_passage(p):
     return (
-        f"{COACH_IDENTITY}\n{_policy(p)}\n\n"
         f"From {p.get('title') or 'a reading'!r}, the student highlighted:\n---\n"
         f"{str(p.get('quote', ''))[:4000]}\n---\n"
         f"Their question about it: {str(p.get('question', ''))[:500]}\n\n"
@@ -225,7 +279,6 @@ def build_ask_passage(p):
 def build_write_step(p):
     doc = str(p.get("docText") or "")[:12000]
     return (
-        f"{COACH_IDENTITY}\n\n"
         "DEVELOPER MODE: the student has asked you to WRITE this part for them, "
         "finished and ready to paste. Do it fully -- no outlines, no 'you could', "
         "no placeholders. Match the assignment's requirements exactly; sound like "
@@ -242,7 +295,6 @@ def build_write_step(p):
 
 def build_answer_all(p):
     return (
-        f"{COACH_IDENTITY}\n\n"
         "DEVELOPER MODE: answer every question in this assignment fully. Show work "
         "where the subject calls for it (math, science). Number the answers to "
         "match the questions. Plain text.\n\n"
@@ -257,7 +309,6 @@ def build_answer_all(p):
 def build_read_photo(p):
     # The handler saved the photo to disk and put its path in p["imagePath"].
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"Read the image file at {p.get('imagePath')} -- it is a photo of the student's "
         "handwritten or paper work for this assignment. Use your file-reading tool "
         "to look at it.\n\n"
@@ -273,7 +324,6 @@ def build_read_photo(p):
 
 def build_edit_doc(p):
     return (
-        f"{COACH_IDENTITY}\n\n"
         "DEVELOPER MODE: you have full write access to the student's Google Doc. "
         "Carry out their instruction exactly, editing the document in place.\n\n"
         + _voice_block(p) +
@@ -303,7 +353,6 @@ def build_flashcards(p):
         for f in files[:6]
     )
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"The student is studying for: {json.dumps(p.get('assignment', {}))}\n\n"
         f"Their material:\n{blocks or '(no files attached — use the assignment description and course)'}\n\n"
         "Make flashcards a 9th grader would actually be tested on: terms, dates, "
@@ -315,7 +364,6 @@ def build_flashcards(p):
 
 def build_study_plan(p):
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"Now: {p.get('now')}\n"
         f"The test: {json.dumps(p.get('assignment', {}))}\n"
         f"Course topics/units (from the portal): {json.dumps(p.get('topics', []))}\n"
@@ -331,7 +379,6 @@ def build_study_plan(p):
 
 def build_autopsy(p):
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"the student's logged focus data (sessions, timing, distractions, commitments):\n"
         f"{json.dumps(p.get('data', {}))}\n\n"
         "Give him honest, non-judgy insights about his real work patterns -- the "
@@ -425,9 +472,7 @@ def build_chat(p):
             "what's solid, what to restudy. Never answer your own question before they try.\n\n"
         )
     return (
-        f"{COACH_IDENTITY}\n\n"
-        f"{_policy(p)}\n\n"
-        f"{_voice_block(p) if p.get('devMode') or p.get('mode') == 'answer' else ''}"
+        f"{_voice_block(p, for_chat=True) if p.get('devMode') or p.get('mode') == 'answer' else ''}"
         f"{quiz_block}"
         "What you can see (be accurate if asked): the student's assignments, grades "
         "and schedule from their school portal; the assignment they're working on, its "
@@ -471,7 +516,6 @@ def build_explain(p):
     """
     a = p.get("assignment", {})
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"{_context_block(p)}"
         f"Assignment (from the portal): {json.dumps(a)}\n\n"
         "Explain this assignment to the student clearly: "
@@ -497,7 +541,6 @@ def build_precheck(p):
     draft = str(p.get("draft", ""))[:12000]
     rubric = str(p.get("rubric", ""))[:2000]
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"Assignment: {json.dumps(a)}\n"
         + (f"Rubric / teacher expectations: {rubric}\n" if rubric else "")
         + f"\nThe student's DRAFT (not yet submitted):\n---\n{draft}\n---\n\n"
@@ -528,7 +571,6 @@ def build_setup(p):
     a = p.get("assignment", {})
     res = p.get("resources", {})
     return (
-        f"{COACH_IDENTITY}\n{_policy(p)}\n\n"
         f"{_context_block(p)}"
         f"Assignment (from the portal, instructions included): {json.dumps(a)}\n\n"
         f"Available resources -- you may ONLY reference these by their numbers:\n"
@@ -561,7 +603,6 @@ def build_setup(p):
 
 def build_debrief(p):
     return (
-        f"{COACH_IDENTITY}\n\n"
         f"the student just finished a focus session: {json.dumps(p.get('session', {}))}\n"
         f"His week so far: {json.dumps(p.get('weekStats', {}))}\n\n"
         "Give him ONE closing line for this session -- specific to the numbers, "
@@ -595,19 +636,65 @@ BUILDERS = {
 }
 
 
-def ask_claude_text(prompt: str) -> str:
-    """Run one headless Claude call and return the raw text reply."""
+_client = None
+
+
+def _api_client():
+    global _client
+    if _client is None:
+        try:
+            import anthropic  # pip3 install anthropic
+        except ImportError as e:
+            raise RuntimeError("API engine needs the SDK: pip3 install anthropic") from e
+        _client = anthropic.Anthropic(api_key=_api_key(), timeout=CLAUDE_TIMEOUT, max_retries=2)
+    return _client
+
+
+def _complete_api(system: str, prompt: str) -> str:
+    """One Claude API call. Thinking is adaptive by default on this model;
+    effort is the latency knob. fallbacks='default' re-runs a classifier
+    decline on another model server-side instead of surfacing a refusal."""
+    resp = _api_client().messages.create(
+        model=API_MODEL,
+        max_tokens=16000,
+        system=system,
+        messages=[{"role": "user", "content": prompt}],
+        extra_headers={"anthropic-beta": "server-side-fallback-2026-07-01"},
+        extra_body={"fallbacks": "default", "output_config": {"effort": API_EFFORT}},
+    )
+    if resp.stop_reason == "refusal":
+        details = getattr(resp, "stop_details", None)
+        why = getattr(details, "explanation", "") or ""
+        raise RuntimeError("the model declined this request" + (f": {why}" if why else ""))
+    return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+
+
+def _complete_cli(system: str, prompt: str) -> str:
+    """One headless `claude -p` call with our own system prompt, no tools, no
+    session file, from an empty directory -- as close to a bare model call
+    as Claude Code gets."""
+    CLI_CWD.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
-        ["claude", "-p", "--model", MODEL, "--output-format", "json"],
+        ["claude", "-p", "--model", MODEL, "--output-format", "json",
+         "--system-prompt", system, "--tools", "", "--no-session-persistence"],
         input=prompt,
         capture_output=True,
         text=True,
         timeout=CLAUDE_TIMEOUT,
-        cwd=str(Path.home()),
+        cwd=str(CLI_CWD),
     )
     if proc.returncode != 0:
         raise RuntimeError(f"claude -p failed: {proc.stderr[:200]}")
-    text = json.loads(proc.stdout).get("result", "").strip()
+    return json.loads(proc.stdout).get("result", "").strip()
+
+
+def _complete(system: str, prompt: str) -> str:
+    return _complete_api(system, prompt) if ENGINE == "api" else _complete_cli(system, prompt)
+
+
+def ask_claude_text(prompt: str, system: str = COACH_IDENTITY) -> str:
+    """Run one Claude call and return the raw text reply."""
+    text = _complete(system, prompt)
     # Only unwrap a reply that is ENTIRELY one fenced block. Stripping a trailing
     # fence unconditionally used to eat the closing ``` of a docops block at the
     # end of a reply, so the panel never saw it as a block.
@@ -617,21 +704,9 @@ def ask_claude_text(prompt: str) -> str:
     return text
 
 
-def ask_claude(prompt: str):
-    """Run one headless Claude call and parse the JSON out of its reply."""
-    proc = subprocess.run(
-        ["claude", "-p", "--model", MODEL, "--output-format", "json"],
-        input=prompt,
-        capture_output=True,
-        text=True,
-        timeout=CLAUDE_TIMEOUT,
-        cwd=str(Path.home()),  # neutral cwd: no project CLAUDE.md noise in the call
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"claude -p failed: {proc.stderr[:200]}")
-
-    envelope = json.loads(proc.stdout)
-    text = envelope.get("result", "")
+def ask_claude(prompt: str, system: str = COACH_IDENTITY):
+    """Run one Claude call and parse the JSON out of its reply."""
+    text = _complete(system, prompt)
     # Claude was told JSON-only, but strip fences defensively.
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     match = re.search(r"\{.*\}", text, re.DOTALL)
@@ -681,8 +756,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.end_headers()
+            self.wfile.write(body)
+        except BrokenPipeError:
+            pass  # the panel gave up waiting (its own timeout) -- nothing to tell it
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -718,7 +796,8 @@ class Handler(SimpleHTTPRequestHandler):
             except OSError:
                 mtime = 0
             return self._send_json(200, {
-                "ok": True, "brain": "claude", "model": MODEL,
+                "ok": True, "brain": "claude", "engine": ENGINE,
+                "model": API_MODEL if ENGINE == "api" else MODEL,
                 "started": int(self.STARTED), "sourceMtime": int(mtime),
                 "stale": mtime > self.STARTED,   # file edited since launch → restart me
                 "methods": sorted(BUILDERS.keys()),
@@ -749,9 +828,10 @@ class Handler(SimpleHTTPRequestHandler):
                 img.write_bytes(base64.b64decode(m.group(2)))
                 payload["imagePath"] = str(img)
             prompt, required = builder(payload)
+            system = _system(payload)
             if method == "chat":
-                return self._send_json(200, {"ok": True, "result": {"reply": ask_claude_text(prompt)}})
-            result = ask_claude(prompt)
+                return self._send_json(200, {"ok": True, "result": {"reply": ask_claude_text(prompt, system)}})
+            result = ask_claude(prompt, system)
             missing = [k for k in required if k not in result]
             if missing:
                 return self._send_json(502, {"error": f"reply missing keys: {missing}"})
@@ -767,7 +847,11 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"Focus Agent bridge on http://127.0.0.1:{PORT}")
-    print(f"  coach brain : claude -p (headless, model={MODEL})")
+    if ENGINE == "api":
+        print(f"  coach brain : Claude API (model={API_MODEL}, effort={API_EFFORT})")
+    else:
+        print(f"  coach brain : claude -p (headless, model={MODEL}) -- no API key found")
+        print(f"                put one in {API_KEY_FILE} (or export ANTHROPIC_API_KEY) for the fast engine")
     # ThreadingHTTPServer matters: brain calls take 15s+, and a single-threaded
     # server would queue the panel's 1.5s health checks behind them.
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

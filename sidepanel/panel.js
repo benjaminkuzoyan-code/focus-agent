@@ -1387,6 +1387,14 @@ async function runChip(cmd) {
       await saveThread();
       return;
     }
+    case "more": {
+      // ⋯ reveals the secondary chips; tap again to tuck them away.
+      const row = $("work-chips");
+      const open = row.classList.toggle("expanded");
+      const btn = row.querySelector(".chat-chip.more");
+      if (btn) btn.textContent = open ? "less" : "⋯";
+      return;
+    }
     case "quiz":
       current.quiz = !current.quiz;
       if (!current.quiz) return pushCoach("Quiz over. Ask me anything or hit quiz me to go again.", { kind: "nudge" });
@@ -2515,11 +2523,14 @@ async function showPendingDone(pd) {
 (async () => {
   const brain = await FA.initCoach();
   const stale = brain === "claude" && FA.bridgeHealth?.stale;
-  $("brain-badge").textContent = stale ? "🧠 bridge needs restart" : brain === "claude" ? "🧠 Claude (bridge)" : "⚙️ rules";
+  const engine = FA.bridgeHealth?.engine === "api" ? "API" : "bridge";
+  $("brain-badge").textContent = stale ? "🧠 bridge needs restart" : brain === "claude" ? `🧠 Claude (${engine})` : "⚙️ rules";
   $("brain-badge").title = stale
     ? "The bridge's code changed since it was started — its prompts are out of date. Ctrl-C it and run: python3 bridge/coach_server.py"
     : brain === "claude"
-      ? "Real Claude brain (local bridge running)"
+      ? engine === "API"
+        ? `Real Claude brain over the API (${FA.bridgeHealth?.model || "claude"})`
+        : "Real Claude brain via headless Claude Code — slow. Put an API key in ~/.focus-agent/api_key and restart the bridge for the fast engine."
       : "Rule-based coach — start the bridge for the real brain: python3 bridge/coach_server.py";
   if (stale) {
     sourceNotice = "⚠️ The coach bridge is running old code — restart it (Ctrl-C, then python3 bridge/coach_server.py) or new features won't reach the brain.";

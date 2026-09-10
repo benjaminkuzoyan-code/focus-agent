@@ -86,9 +86,18 @@ Still running underneath: tab parking (distractors move to a minimized window �
 
 Cut in v0.7: boss battles, the Quests tab, the Panic tab (now the time chips), the Timer tab (now the work view), per-card Explain/Pre-check/Break-down buttons (now chips inside the work view).
 
-## The bridge server (the REAL Claude brain, no API key yet)
+## The bridge server (the REAL Claude brain)
 
-`python3 bridge/coach_server.py` runs on `127.0.0.1:8000` and turns the extension's requests into headless `claude -p` calls with Ben's login. Restart it after editing — the panel shows **🧠 bridge needs restart** when its code is stale. Friends' machines don't have it: without the bridge the coach is rules-only until the API key + hosted backend land.
+`python3 bridge/coach_server.py` runs on `127.0.0.1:8000` and answers the extension's coach calls. Two engines, picked when it starts:
+
+- **API** (fast, the real thing): put your Anthropic API key in `~/.focus-agent/api_key` (one line) or export `ANTHROPIC_API_KEY`, and `pip3 install anthropic` once. Replies in a few seconds; the coach's identity and help policy ride in a real system prompt. `FA_EFFORT=high` for deeper, slower answers (default `medium`); `FA_API_MODEL` to change the model.
+- **claude-cli** (fallback, no key): headless `claude -p` with your Claude Code login. 10-60s per call and it hit the 150s timeout on ~8% of calls in the log — use it only until the key lands.
+
+Restart the bridge after editing it — the panel shows **🧠 bridge needs restart** when its code is stale, and ⚙ → the brain badge says which engine is live. Friends' machines don't have a bridge: without one the coach is rules-only until there's a hosted backend.
+
+**Coach voice:** casual, direct, like a sharp older friend — set in `COACH_IDENTITY` in `bridge/coach_server.py`. The tutor policy holds back only the final answer to graded work and says so in one line; answer mode and developer mode hand things over, including again after a cleared chat. Your writing-voice profile applies only to text the coach writes *for* you, never to how it chats.
+
+**Chips:** the work chat shows three (`I'm stuck` · `explain` · `check my draft`, plus `quiz me` on a test) and a `⋯` that reveals the rest — break it down, 5 more minutes, format my doc, flashcards, study plan, clear chat, and the developer chips.
 
 ## Test checklist
 
