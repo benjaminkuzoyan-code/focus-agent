@@ -671,12 +671,20 @@ def _complete_api(system: str, prompt: str) -> str:
 
 def _complete_cli(system: str, prompt: str) -> str:
     """One headless `claude -p` call with our own system prompt, no tools, no
-    session file, from an empty directory -- as close to a bare model call
-    as Claude Code gets."""
+    session file, no settings, from an empty directory -- as close to a bare
+    model call as Claude Code gets while still using the login.
+
+    --setting-sources "" is the important one: with the user's settings.json
+    loaded, Ben's SessionStart/Stop hooks ran inside EVERY coach call -- the
+    Stop hook demanded an Obsidian log entry, so the reply the panel showed
+    was often the model's 'Logged -- ...' note instead of the answer, and
+    each call took 15s+ instead of ~3s. (--bare would also do it, but it skips
+    keychain reads and so loses the login.)"""
     CLI_CWD.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(
         ["claude", "-p", "--model", MODEL, "--output-format", "json",
-         "--system-prompt", system, "--tools", "", "--no-session-persistence"],
+         "--system-prompt", system, "--tools", "", "--no-session-persistence",
+         "--setting-sources", ""],
         input=prompt,
         capture_output=True,
         text=True,
