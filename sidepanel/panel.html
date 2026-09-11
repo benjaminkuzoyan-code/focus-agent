@@ -77,12 +77,25 @@
           <div id="work-title" class="work-title"></div>
           <div id="work-meta" class="work-meta"></div>
         </div>
-        <div class="work-clock">
-          <div id="work-elapsed" class="work-elapsed">0:00</div>
-          <div id="work-chunk" class="work-chunk"></div>
+      </div>
+      <!-- The clock: a ring you can't miss. No session → the ring IS the start button. -->
+      <div class="ring-wrap work-ring">
+        <svg class="ring" viewBox="0 0 220 220" aria-hidden="true">
+          <defs>
+            <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#818cf8" />
+              <stop offset="1" stop-color="#c084fc" />
+            </linearGradient>
+          </defs>
+          <circle class="ring-bg" cx="110" cy="110" r="96" />
+          <circle id="ring-fg" class="ring-fg" cx="110" cy="110" r="96" />
+        </svg>
+        <div class="ring-center">
+          <div id="work-elapsed" class="timer-clock">0:00</div>
+          <div id="work-chunk" class="timer-sub"></div>
+          <button id="ring-start" class="primary pulse hidden" title="Start the clock on this assignment">▶ start</button>
         </div>
       </div>
-      <div class="chunk-bar"><div id="chunk-fill" class="chunk-fill"></div></div>
       <!-- Ramp: the coach proposes this sitting's length from your history; tap to change -->
       <div class="chunk-row">
         <div id="chunk-chips" class="chunk-chips"></div>

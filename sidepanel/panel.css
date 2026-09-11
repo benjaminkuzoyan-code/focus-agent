@@ -578,6 +578,19 @@ select {
   background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .work-chunk { font-size: 10.5px; color: var(--muted); margin-top: 3px; max-width: 120px; }
+/* Work-view ring: 180px so the checklist still fits above the fold. */
+.work-ring { width: 180px; margin: 2px auto 8px; }
+.work-ring .ring { width: 180px; height: 180px; }
+.work-ring .timer-clock { font-size: 38px; }
+.work-ring .timer-sub { max-width: 130px; line-height: 1.3; }
+.ring-fg.idle { stroke: var(--amber); filter: drop-shadow(0 0 8px rgba(252, 211, 77, 0.6)); }
+@media (prefers-reduced-motion: no-preference) {
+  .ring-fg.idle { animation: ringBlink 1.1s ease-in-out infinite alternate; }
+  @keyframes ringBlink { from { opacity: 0.45; } to { opacity: 1; } }
+}
+.ring-center .primary { padding: 9px 18px; font-size: 13.5px; margin-top: 4px; }
+.timer-clock.dim { opacity: 0.35; font-size: 26px; }
+.msg.k-idle { border-color: rgba(252, 211, 77, 0.55); background: linear-gradient(140deg, rgba(252, 211, 77, 0.1), var(--glass)); }
 .chunk-bar { height: 4px; background: rgba(255, 255, 255, 0.07); border-radius: 999px; overflow: hidden; margin-bottom: 10px; }
 .chunk-fill { height: 100%; background: var(--grad); border-radius: 999px; transition: width 0.9s linear; box-shadow: 0 0 8px rgba(129, 140, 248, 0.6); }
 .chunk-fill.over { background: var(--amber); box-shadow: 0 0 8px rgba(252, 211, 77, 0.5); }

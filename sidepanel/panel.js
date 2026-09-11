@@ -698,17 +698,30 @@ async function enterWork(assignment) {
   }
 }
 
+const RING_C = 603.19; // 2π·96, the ring circle's circumference
+
 async function restoreClock() {
   clearInterval(timerInterval);
   const session = await FA.store.getActiveSession();
   const moodRow = $("mood-row");
+  const ring = $("ring-fg");
+  const startBtn = $("ring-start");
   if (!session) {
+    // No clock → the ring is the start button, pre-set to the Ramp proposal.
+    const sessions = await FA.store.getSessions();
+    const proposal = current ? FA.proposeChunk(sessions, current.assignment) : { minutes: 15 };
     $("work-elapsed").textContent = "—";
+    $("work-elapsed").classList.add("dim");
     $("work-chunk").textContent = "no clock running";
-    $("chunk-fill").style.width = "0%";
+    startBtn.textContent = `▶ start ${proposal.minutes} min`;
+    startBtn.classList.remove("hidden");
+    ring.style.strokeDashoffset = RING_C;
+    ring.classList.remove("overtime", "idle");
     moodRow.classList.add("hidden");
     return;
   }
+  startBtn.classList.add("hidden");
+  $("work-elapsed").classList.remove("dim");
   if (!session.mood && !session.moodSkipped) {
     moodRow.classList.remove("hidden");
     $("mood-response").classList.add("hidden");
@@ -724,14 +737,19 @@ async function restoreClock() {
     $("work-elapsed").textContent = `${mm}:${ss}`;
     const chunk = session.plannedMin * 60;
     const pct = Math.min((elapsed / chunk) * 100, 100);
-    $("chunk-fill").style.width = pct.toFixed(1) + "%";
-    $("chunk-fill").classList.toggle("over", elapsed > chunk);
-    $("work-chunk").textContent =
-      session.mode === "paper"
-        ? "paper mode — check-ins by notification"
+    ring.style.strokeDashoffset = (RING_C * (1 - pct / 100)).toFixed(1);
+    ring.classList.toggle("overtime", elapsed > chunk && !session.idleAskAt);
+    ring.classList.toggle("idle", Boolean(session.idleAskAt));
+    const stepsDone = current?.steps.filter((s) => s.done).length || 0;
+    const stepsTotal = current?.steps.length || 0;
+    const stepTag = stepsTotal ? ` · step ${Math.min(stepsDone + 1, stepsTotal)}/${stepsTotal}` : "";
+    $("work-chunk").textContent = session.idleAskAt
+      ? "still there? tap anything"
+      : session.mode === "paper"
+        ? "paper mode — check-ins by notification" + stepTag
         : elapsed <= chunk
-          ? `${Math.ceil((chunk - elapsed) / 60)} min left in this chunk`
-          : `past the ${session.plannedMin}-min chunk — finish the thought`;
+          ? `${Math.ceil((chunk - elapsed) / 60)} min left${stepTag}`
+          : `past ${session.plannedMin} min — finish the thought${stepTag}`;
     // Chunk boundary → one checkpoint in the thread (per chunk length).
     if (elapsed >= chunk && !checkpointFired && session.checkpointFor !== session.plannedMin) {
       checkpointFired = true;
@@ -1389,6 +1407,13 @@ async function runChip(cmd) {
       await saveThread();
       return;
     }
+    case "idle-yes":
+      chrome.runtime.sendMessage({ type: "ACTIVITY" }).catch(() => {});
+      await FA.store.updateActiveSession({ lastActiveAt: Date.now(), idleAskAt: 0 });
+      await restoreClock();
+      return pushCoach("Clock's running. Carry on.", { kind: "nudge" });
+    case "idle-stop":
+      return finishWork(false);
     case "more": {
       // ⋯ reveals the secondary chips; tap again to tuck them away.
       const row = $("work-chips");
@@ -2049,16 +2074,37 @@ async function finishWork(done) {
 /* ------------------------------------------------------------------ *
  * STATE C — done
  * ------------------------------------------------------------------ */
-const DONE_LABELS = { user: "done ✓", portal: "myPoly says it's done ✓", steps: "every step checked ✓", doc: "doc finished ✓", stop: "stopped — logged" };
+const DONE_LABELS = { user: "done ✓", portal: "myPoly says it's done ✓", steps: "every step checked ✓", doc: "doc finished ✓", stop: "stopped — logged", idle: "clock stopped — you went quiet" };
+
+/**
+ * Estimate calibration: how far this course's guesses run from reality, from
+ * finished assignments (estMin vs minutes actually logged). The planning
+ * fallacy in the interviews was ~5×; showing the number is the fix.
+ */
+function estimateCalibration(meta, course) {
+  const ratios = Object.values(meta || {})
+    .filter((m) => m?.done && m.estMin && m.spentMin >= 3 && (!course || m.course === course))
+    .map((m) => m.spentMin / m.estMin)
+    .sort((a, b) => a - b);
+  if (ratios.length < 2) return null;
+  const med = ratios[Math.floor(ratios.length / 2)];
+  return { ratio: Math.round(med * 10) / 10, n: ratios.length };
+}
 
 async function renderDone(a, record, done) {
   $("done-label").textContent = DONE_LABELS[record?.endedBy] || (done ? "done ✓" : "stopped — logged");
   $("done-title").textContent = a?.title || "Focus session";
   const spent = record?.actualMin || 0;
   const guess = a?.estMin;
-  $("done-stats").textContent = guess
-    ? `${spent} min this sitting · you guessed ~${guess} min for the whole thing`
-    : `${spent} min this sitting`;
+  const bits = [guess ? `${spent} min this sitting · you guessed ~${guess} min for the whole thing` : `${spent} min this sitting`];
+  if (record?.idleMin) bits.push(`${record.idleMin} quiet min not counted`);
+  if (done && a) {
+    // Remember the guess with the assignment so calibration can use it later.
+    await FA.store.patchAssignmentMeta(a.id, { estMin: a.estMin, course: a.course });
+    const cal = estimateCalibration(await FA.store.getMeta(), a.course);
+    if (cal && cal.ratio >= 1.3) bits.push(`your ${a.course} guesses run ${cal.ratio}× short (${cal.n} finished)`);
+  }
+  $("done-stats").textContent = bits.join(" · ");
 
   const deb = $("done-debrief");
   deb.textContent = "";
@@ -2516,6 +2562,33 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
   }
   if (changes.pendingDone?.newValue) showPendingDone(changes.pendingDone.newValue);
+  // The worker flips idleAskAt / lastActiveAt; the ring should show it now.
+  if (changes.activeSession && current && $("view-work").classList.contains("active")) {
+    const was = changes.activeSession.oldValue;
+    const now = changes.activeSession.newValue;
+    if (Boolean(was?.idleAskAt) !== Boolean(now?.idleAskAt) || Boolean(was) !== Boolean(now)) restoreClock();
+  }
+});
+
+// Any tap or keystroke in the panel = the student is here (throttled).
+let lastActivityPing = 0;
+for (const ev of ["click", "keydown"]) {
+  document.addEventListener(
+    ev,
+    () => {
+      if (Date.now() - lastActivityPing < 20000) return;
+      lastActivityPing = Date.now();
+      chrome.runtime.sendMessage({ type: "ACTIVITY" }).catch(() => {});
+    },
+    { passive: true }
+  );
+}
+
+// The ring's start button (no clock running).
+$("ring-start").addEventListener("click", async () => {
+  if (!current) return;
+  await startSession(current.assignment);
+  await restoreClock();
 });
 
 /** The worker detected completion (portal flip) and closed the session. */

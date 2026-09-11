@@ -24,6 +24,11 @@ importScripts(
 const CHECKIN_ALARM = "fa-checkin";
 const DETECT_ALARM = "fa-detect";       // completion detection, every minute during a session
 const DOC_STALE_MS = 8 * 60 * 1000;     // a doc untouched this long → "looks finished?"
+// Runaway-clock watchdog. Quiet this long → "still there?"; unanswered for the
+// grace period → the clock stops AT THE LAST SIGN OF LIFE. Before this, a
+// forgotten timer logged 300+ minute "sessions" that poisoned every stat.
+const IDLE_ASK_MS = 10 * 60 * 1000;
+const IDLE_GRACE_MS = 5 * 60 * 1000;
 const COMMITMENT_ALARM = "fa-commitments";
 const NUDGE_COOLDOWN_MS = 2 * 60 * 1000; // at most one negotiation per 2 min
 
@@ -231,6 +236,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: true });
         break;
 
+      case "ACTIVITY": {
+        // The panel saw a tap/keystroke — the student is here.
+        const s = await FA.store.getActiveSession();
+        if (s) await FA.store.updateActiveSession({ lastActiveAt: Date.now(), idleAskAt: 0 });
+        sendResponse({ ok: true });
+        break;
+      }
+
       case "GET_COACH_STATE": {
         // The page overlay sends the assignments it just fetched; we rank
         // them against stored session history and return the coach's pick,
@@ -407,6 +420,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 
   if (alarm.name === DETECT_ALARM) {
+    await idleWatch();
     await detectCompletion();
   }
 
@@ -492,19 +506,97 @@ async function runNightlyPlan() {
  * ------------------------------------------------------------------ */
 let detectTick = 0;
 
-async function appendThread(assignmentId, text, kind) {
+async function appendThread(assignmentId, text, kind, actions) {
   const meta = await FA.store.getMeta();
   const thread = Array.isArray(meta[assignmentId]?.thread) ? meta[assignmentId].thread : [];
-  thread.push({ role: "coach", text: String(text).slice(0, 3000), kind, at: Date.now() });
+  const msg = { role: "coach", text: String(text).slice(0, 3000), kind, at: Date.now() };
+  if (actions?.length) msg.actions = actions;
+  thread.push(msg);
   await FA.store.patchAssignmentMeta(assignmentId, { thread: thread.slice(-40) });
+}
+
+/* ------------------------------------------------------------------ *
+ * Still there? — the runaway-clock watchdog (every minute while a session runs)
+ * ------------------------------------------------------------------ */
+function systemActive() {
+  // chrome.idle: "active" = mouse/keyboard in the last 60s anywhere on the
+  // computer. Paper work reads as idle — that's what the ask is for.
+  return new Promise((resolve) => {
+    try {
+      chrome.idle.queryState(60, (state) => resolve(state === "active"));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function idleWatch() {
+  const session = await FA.store.getActiveSession();
+  if (!session) return;
+  const now = Date.now();
+  const lastActiveAt = session.lastActiveAt || session.startedAt;
+  if (await systemActive()) {
+    if (now - lastActiveAt > 30000 || session.idleAskAt) await FA.store.updateActiveSession({ lastActiveAt: now, idleAskAt: 0 });
+    return;
+  }
+  const quietMs = now - lastActiveAt;
+  if (quietMs < IDLE_ASK_MS) return;
+  const quietMin = Math.round(quietMs / 60000);
+  if (!session.idleAskAt) {
+    await FA.store.updateActiveSession({ idleAskAt: now });
+    chrome.notifications.create(`fa-idle-${now}`, {
+      type: "basic",
+      iconUrl: "icons/icon128.png",
+      title: "Still there?",
+      message: `Nothing's moved for ${quietMin} min. The clock on "${session.title}" stops in 5 unless you tap.`,
+      buttons: [{ title: "Still working ✓" }, { title: "Stop the clock" }],
+      priority: 2,
+      requireInteraction: true,
+    });
+    await appendThread(
+      session.assignmentId,
+      `Still there? Nothing's moved for ${quietMin} min — the clock stops in 5 unless you tap.`,
+      "idle",
+      [{ label: "still here ✓", cmd: "idle-yes" }, { label: "stop the clock", cmd: "idle-stop" }]
+    );
+    return;
+  }
+  if (now - session.idleAskAt >= IDLE_GRACE_MS) await stopSession(session, "idle", lastActiveAt);
+}
+
+/** Stop the clock from the worker (idle timeout or the notification's button). */
+async function stopSession(session, endedBy, endedAt) {
+  chrome.alarms.clear(CHECKIN_ALARM);
+  chrome.alarms.clear(DETECT_ALARM);
+  const meta = await FA.store.getMeta();
+  const steps = meta[session.assignmentId]?.steps || [];
+  const idleMin = Math.max(0, Math.round((Date.now() - endedAt) / 60000));
+  const record = await FA.store.endSession(endedBy, {
+    endedAt,
+    idleMin,
+    stepsDone: steps.filter((s) => s.done).length,
+    stepsTotal: steps.length,
+  });
+  await chrome.storage.local.set({ pendingDone: { assignmentId: session.assignmentId, title: session.title, record, reason: endedBy, at: Date.now() } });
+  const at = new Date(endedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  chrome.notifications.create(`fa-done-${Date.now()}`, {
+    type: "basic",
+    iconUrl: "icons/icon128.png",
+    title: endedBy === "idle" ? "Clock stopped" : "Stopped ✓",
+    message: endedBy === "idle"
+      ? `"${session.title}" — ${record.actualMin} min logged, stopped at ${at} when things went quiet. ${idleMin} quiet min not counted.`
+      : `"${session.title}" — ${record.actualMin} min logged.`,
+    priority: 1,
+  });
 }
 
 async function detectCompletion() {
   const session = await FA.store.getActiveSession();
-  if (!session || !session.assignmentId || session.assignmentId === "free") {
+  if (!session) {
     chrome.alarms.clear(DETECT_ALARM);
     return;
   }
+  if (!session.assignmentId || session.assignmentId === "free") return; // idleWatch still needs the alarm
   detectTick++;
   const elapsedMin = (Date.now() - session.startedAt) / 60000;
 
@@ -544,7 +636,8 @@ async function detectCompletion() {
         const sig = `${d.revisionId || ""}:${d.text.length}`;
         const prev = session.docState;
         if (!prev || prev.sig !== sig) {
-          await FA.store.updateActiveSession({ docState: { sig, at: Date.now() } });
+          // The doc changed → they're here, whatever the mouse says.
+          await FA.store.updateActiveSession({ docState: { sig, at: Date.now() }, lastActiveAt: Date.now(), idleAskAt: 0 });
         } else if (Date.now() - prev.at >= DOC_STALE_MS && d.text.trim().length > 200) {
           await FA.store.updateActiveSession({ askedDoc: true });
           await appendThread(session.assignmentId, "Your doc hasn't changed in 8 minutes — looks finished? Hit done ✓ if it's turned in, or tell me what's left.", "ask-done");
@@ -584,7 +677,7 @@ async function noteActivity(tabId) {
   const session = await FA.store.getActiveSession();
   if (!session) return;
   lastActivityWrite = Date.now();
-  await FA.store.updateActiveSession({ activityCount: (session.activityCount || 0) + 1 });
+  await FA.store.updateActiveSession({ activityCount: (session.activityCount || 0) + 1, lastActiveAt: Date.now(), idleAskAt: 0 });
 }
 chrome.tabs.onActivated.addListener(({ tabId }) => noteActivity(tabId));
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -638,6 +731,14 @@ chrome.notifications.onButtonClicked.addListener(async (notifId, buttonIndex) =>
   if (notifId.startsWith("fa-commit-")) {
     const id = notifId.replace("fa-commit-", "");
     await FA.store.resolveCommitment(id, buttonIndex === 0);
+  }
+
+  if (notifId.startsWith("fa-idle-")) {
+    const session = await FA.store.getActiveSession();
+    if (session) {
+      if (buttonIndex === 0) await FA.store.updateActiveSession({ lastActiveAt: Date.now(), idleAskAt: 0 });
+      else await stopSession(session, "stop", Date.now());
+    }
   }
 
   chrome.notifications.clear(notifId);
