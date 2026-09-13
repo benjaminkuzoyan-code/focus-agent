@@ -40,6 +40,19 @@
       <div id="forecast-strip" class="forecast-strip"></div>
       <div id="forecast-headline" class="forecast-headline"></div>
 
+      <!-- The coach's pick: the ONE primary action on this screen. Every other
+           card keeps its own ▶, but this is the button a first-timer should see. -->
+      <div id="pick-hero" class="pick-hero hidden">
+        <div class="pick-label">start here</div>
+        <div id="pick-title" class="pick-title"></div>
+        <div id="pick-meta" class="card-meta"></div>
+        <div id="pick-reason" class="pick-reason"></div>
+        <div class="pick-actions">
+          <button id="pick-start" class="primary wide">▶ Smart Start</button>
+          <button id="pick-done" class="done-mini" title="Already finished this">✓</button>
+        </div>
+      </div>
+
       <!-- Panic is a mode of the list: pick how much time you have, the
            list reorders and says what dies tonight. -->
       <div class="time-row">

@@ -780,3 +780,20 @@ body:not(.studying) .chat-chips:not(.expanded) .chat-chip.test-chip { display: n
 .snap-sec li { margin: 2px 0; }
 .msg.k-timeup { border-color: rgba(252, 211, 77, 0.7); background: linear-gradient(140deg, rgba(252, 211, 77, 0.16), var(--glass)); font-weight: 600; }
 .msg.k-timeup .countdown { display: block; color: var(--amber); font-weight: 800; margin-top: 4px; }
+
+/* ---------- the coach's pick (primary action) + first run ---------- */
+.pick-hero { background: linear-gradient(140deg, rgba(129, 140, 248, 0.18), var(--glass)); border: 1px solid rgba(129, 140, 248, 0.45); border-radius: var(--r); padding: 12px 14px 12px; margin-bottom: 10px; }
+.pick-label { color: var(--muted); font-size: 10.5px; letter-spacing: 0.8px; text-transform: uppercase; margin-bottom: 4px; }
+.pick-title { font-weight: 700; font-size: 15px; line-height: 1.3; }
+.pick-reason { font-size: 12.5px; line-height: 1.45; margin-top: 6px; }
+.pick-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.pick-actions .primary.wide { flex: 1; }
+.first-run { padding: 14px 14px 12px; }
+.first-run h3 { margin: 0 0 6px; font-size: 15px; }
+.first-run ol { margin: 8px 0 0 18px; padding: 0; line-height: 1.6; }
+.first-run li { margin: 6px 0; }
+.first-run .inline-btn { border: none; border-radius: 999px; padding: 4px 11px; font-size: 12px; cursor: pointer; background: var(--glass-strong); color: var(--ink); margin: 0 4px; }
+.first-run .inline-btn.primary { background: var(--grad); color: white; font-weight: 700; }
+.first-run details { margin-top: 10px; color: var(--muted); font-size: 12px; }
+.first-run summary { cursor: pointer; }
+.first-run .why { margin-top: 6px; white-space: pre-wrap; font-size: 11.5px; }

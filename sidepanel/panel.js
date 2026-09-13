@@ -16,6 +16,7 @@
  * State
  * ------------------------------------------------------------------ */
 let assignments = [];   // normalized, from the portal tab or the cache
+let lastDiag = "";      // why the last portal read failed; shown inside the first-run card's details
 let ranked = [];        // assignments + estMin + urgency, sorted
 let sourceNotice = "";  // why we're NOT showing live portal data ("" when live)
 let snapshot = null;    // full Student Snapshot (classes, grades, schedule)
@@ -229,12 +230,14 @@ async function loadAssignments(retried = false) {
     ? `${diag[0]}, ${disconnected} not connected — refresh a portal tab, then hit ↻`
     : diag.slice(0, 3).join("; ");
   console.warn("[Focus Agent] panel: no live portal data.", why);
+  lastDiag = why;
   if (cache?.items?.length) {
     assignments = cache.items;
-    sourceNotice = `⚠️ Cached assignments from ${new Date(cache.fetchedAt).toLocaleTimeString()} — ${why}. Refresh your portal tab, then hit ↻.`;
+    const at = new Date(cache.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    sourceNotice = `This list is from ${at} and might be out of date — reload your school tab, then tap ↻.`;
   } else {
     assignments = [];
-    sourceNotice = `Open your school's assignment page in a tab (Blackbaud/myPoly, Canvas or Google Classroom), then tap ↻ up top. Other school? ⚙ → connect my school. (${why})`;
+    sourceNotice = "Nothing connected yet — see the steps below.";
   }
 }
 
@@ -316,28 +319,62 @@ function dueLabel(a) {
   return `due ${new Date(a.dueDate).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`;
 }
 
-function renderList(meta = {}) {
-  // Instant pick from the rules, upgraded in place by the real brain.
-  const box = $("coach-pick");
-  box.classList.remove("hidden");
-  const showPick = ({ assignment, reason }, fromClaude) => {
-    const prefix = fromClaude ? "🧠 " : "";
-    $("coach-pick-text").textContent = assignment
-      ? `${prefix}"${assignment.title}" — ${reason}`
-      : prefix + reason;
-  };
-  showPick(new FA.MockCoach().pick(ranked), false);
-  if (FA.coachBrain === "claude") {
-    Promise.resolve(FA.coach.pick(ranked)).then((p) => showPick(p, true)).catch(() => {});
-  }
+/** The three steps a first-timer needs, with the actual buttons inline. */
+function renderFirstRun(list) {
+  const card = document.createElement("div");
+  card.className = "card first-run";
+  card.innerHTML = `
+    <h3>Let's get your assignments in</h3>
+    <ol>
+      <li>Open your school's assignment page in a new tab — Blackbaud / myPoly, Canvas, or
+        <button class="inline-btn" data-open="https://classroom.google.com/u/0/a/not-turned-in/all">Google Classroom</button></li>
+      <li>Come back here and tap <button class="inline-btn primary" data-refresh>↻ Refresh</button></li>
+      <li>Tap <b>▶ Smart Start</b> on the one at the top. That's it.</li>
+    </ol>
+    <details>
+      <summary>Different school system, or not working?</summary>
+      <div class="why">Other systems: <button class="inline-btn" data-settings>⚙ connect my school</button> while your school's assignment page is open.</div>
+      <div class="why diag"></div>
+    </details>`;
+  if (lastDiag) card.querySelector(".why.diag").textContent = `What happened on the last try: ${lastDiag}`;
+  card.querySelector("[data-open]").addEventListener("click", (e) => openTab(e.currentTarget.dataset.open, true));
+  card.querySelector("[data-refresh]").addEventListener("click", () => reloadFromPortal());
+  card.querySelector("[data-settings]").addEventListener("click", () => showView("more"));
+  list.appendChild(card);
+}
 
+/** The pick hero: one primary button for the assignment the coach would start. */
+function renderHero({ assignment, reason }, fromClaude) {
+  const hero = $("pick-hero");
+  if (!assignment) return hero.classList.add("hidden");
+  hero.classList.remove("hidden");
+  $("pick-title").textContent = assignment.title;
+  $("pick-meta").textContent = `${assignment.course} · ${dueLabel(assignment)} · ~${assignment.estMin} min` + (assignment.points ? ` · ${assignment.points} pts` : "");
+  $("pick-reason").textContent = `${fromClaude ? "🧠 " : ""}${reason}`;
+  $("pick-start").onclick = () => smartStart(assignment);
+  $("pick-done").onclick = async () => {
+    await FA.store.markDone(assignment.id);
+    await FA.store.addQuestEvent(assignment, assignment.estMin);
+    await refreshAll();
+  };
+  hero.dataset.id = assignment.id;
+}
+
+function renderList(meta = {}) {
+  $("coach-pick").classList.add("hidden"); // the pick lives in the hero now
   const list = $("today-list");
   list.innerHTML = "";
   if (!ranked.length) {
-    list.innerHTML = assignments.length
-      ? '<div class="empty-note">Nothing pending. 🏖️</div>'
-      : '<div class="empty-note">No assignments yet.<br><span class="small">Open your school portal in a tab and hit ↻ — or ⚙ → connect my school.</span></div>';
+    renderHero({ assignment: null, reason: "" }, false);
+    if (assignments.length) list.innerHTML = '<div class="empty-note">Nothing pending. 🏖️</div>';
+    else renderFirstRun(list);
     return;
+  }
+
+  // Instant pick from the rules, upgraded in place by the real brain.
+  renderHero(new FA.MockCoach().pick(ranked), false);
+  if (FA.coachBrain === "claude") {
+    Promise.resolve(FA.coach.pick(ranked)).then((p) => { if (p?.assignment) renderHero(p, true); }).catch(() => {});
   }
 
   for (const a of ranked) {

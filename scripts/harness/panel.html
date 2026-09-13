@@ -40,6 +40,19 @@
       <div id="forecast-strip" class="forecast-strip"></div>
       <div id="forecast-headline" class="forecast-headline"></div>
 
+      <!-- The coach's pick: the ONE primary action on this screen. Every other
+           card keeps its own ▶, but this is the button a first-timer should see. -->
+      <div id="pick-hero" class="pick-hero hidden">
+        <div class="pick-label">start here</div>
+        <div id="pick-title" class="pick-title"></div>
+        <div id="pick-meta" class="card-meta"></div>
+        <div id="pick-reason" class="pick-reason"></div>
+        <div class="pick-actions">
+          <button id="pick-start" class="primary wide">▶ Smart Start</button>
+          <button id="pick-done" class="done-mini" title="Already finished this">✓</button>
+        </div>
+      </div>
+
       <!-- Panic is a mode of the list: pick how much time you have, the
            list reorders and says what dies tonight. -->
       <div class="time-row">
@@ -156,7 +169,7 @@
         <button class="chat-chip secondary dev" data-cmd="dev-write" title="Dev: the coach writes the current step">write this step</button>
         <button class="chat-chip secondary dev" data-cmd="dev-answer" title="Dev: the coach answers the questions">answer these</button>
         <button class="chat-chip secondary dev" data-cmd="dev-photo" title="Dev: photo of paper work → steps checked + feedback">📷 photo of my work</button>
-        <button class="chat-chip secondary dev" data-cmd="dev-complete" title="Dev: tick it complete in myPoly">mark it complete</button>
+        <button class="chat-chip secondary dev" data-cmd="dev-complete" title="Dev: tick it complete in your portal">mark it complete</button>
         <button class="chat-chip secondary dev" data-cmd="dev-edit" title="Dev: tell the coach what to change in the doc — it edits in place">edit my doc…</button>
         <button class="chat-chip secondary dev" data-cmd="dev-autopilot" title="Dev: open everything, make the doc, write every step, check them off">🚀 autopilot</button>
       </div>
@@ -264,7 +277,7 @@
       </div>
 
       <div class="section-title">your writing voice</div>
-      <p class="muted small">Give the coach pieces you actually wrote. Anything it writes for you — steps, answers, edits — will sound like you. Stays on this device.</p>
+      <p class="muted small">Give the coach pieces you actually wrote so its feedback matches how you write. Stays on this device.</p>
       <div id="voice-profile" class="voice-profile muted small"></div>
       <div class="files" id="voice-box">
         <div class="files-head">
@@ -284,7 +297,7 @@
       <div class="settings">
         <div class="settings-row">
           <span>style guide <span id="voice-guide-note" class="muted small"></span></span>
-          <button id="voice-import-guide" class="chip chip-btn" title="Import the /essay skill's style guide + sample files from this computer (via the bridge)">import mine</button>
+          <button id="voice-import-guide" class="chip chip-btn" title="Import a style guide + sample essays from this computer (developer)">import mine</button>
         </div>
         <div class="settings-row">
           <span>learn from essays I finish <span class="muted small">(adds the doc as a sample when you hit done, if you wrote it yourself)</span></span>
@@ -299,17 +312,18 @@
       <div class="section-title">settings</div>
       <div class="settings">
         <div class="settings-row">
-          <span>brain</span>
-          <span id="brain-badge" class="chip">⚙️ rules</span>
+          <span>coach</span>
+          <span id="brain-badge" class="chip">simple mode</span>
         </div>
         <div class="settings-row">
-          <span>coach server <span class="muted small">(blank = this computer)</span></span>
+          <span>coach link <span class="muted small">(optional — paste the link you were given)</span></span>
           <input type="text" id="bridge-url" placeholder="https://…" autocomplete="off" spellcheck="false" />
         </div>
         <div class="settings-row">
-          <span>access code <span class="muted small">(from Ben)</span></span>
+          <span>coach code <span class="muted small">(paste the code you were given)</span></span>
           <input type="password" id="bridge-token" placeholder="paste it here" autocomplete="off" />
         </div>
+        <p class="muted small">Both come from whoever set you up. Leave them blank and the coach stays in simple mode: steps, clock and streak still work.</p>
         <div class="settings-row">
           <span>Google (Docs + Calendar) <span id="google-note" class="muted small"></span></span>
           <button id="google-btn" class="chip chip-btn">G</button>
@@ -325,8 +339,8 @@
           <span>draw on this page <span class="muted small">(pen/highlighter canvas)</span></span>
           <button id="annotate-btn" class="chip chip-btn" title="Highlighter/pen overlay on the current tab">✏️</button>
         </div>
-        <div class="settings-row">
-          <span>developer mode <span class="muted small">(Ben's build: do-it-for-me chips)</span></span>
+        <div class="settings-row" id="dev-mode-row">
+          <span>developer mode</span>
           <input type="checkbox" id="dev-toggle" />
         </div>
         <div class="settings-row dev">
@@ -338,8 +352,8 @@
           <input type="checkbox" id="autopilot-toggle" />
         </div>
         <div class="settings-row dev">
-          <span>auto-actions on done <span class="muted small">(tick complete in myPoly · Calendar block for the next item)</span></span>
-          <input type="checkbox" id="auto-done-toggle" />
+          <span>auto-actions on done <span class="muted small">(tick complete in your portal · calendar block for the next item)</span></span>
+          <input type="checkbox" id="auto-done-toggle" disabled title="Not available yet — marking complete in the portal isn't wired up" />
         </div>
       </div>
       <div class="section-title">how highlighting works</div>
