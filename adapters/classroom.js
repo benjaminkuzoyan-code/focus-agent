@@ -71,8 +71,14 @@
           ? lines[titleIdx + 1]
           : "";
 
+        // classroom.google.com/c/<course>/a/<assignment>/details -- the assignment id is
+        // the only stable key. Without it makeAssignment hashes title|course|dueDate, and
+        // "Due Today" resolves to a fresh timestamp every fetch, so every id churned.
+        const href = link.getAttribute("href") || "";
+        const idMatch = href.match(/\/a\/([\w-]+)/);
         results.push(
           FA.makeAssignment({
+            id: idMatch ? idMatch[1] : undefined,
             title,
             course,
             type: title,

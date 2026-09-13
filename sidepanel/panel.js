@@ -813,7 +813,11 @@ function renderChunkChips(session) {
     b.title = `${m}-minute sitting`;
     b.classList.toggle("active", m === session.plannedMin);
     b.addEventListener("click", async () => {
-      await FA.store.updateActiveSession({ plannedMin: m, checkpointFor: null, timeUpAt: 0 });
+      // A chip below the time already worked can't shorten history: the sitting ends
+      // at the NEXT whole minute instead, and the real elapsed time is what gets logged.
+      const elapsedMin = Math.ceil((Date.now() - session.startedAt) / 60000);
+      const planned = Math.max(m, elapsedMin + (elapsedMin >= m ? 1 : 0));
+      await FA.store.updateActiveSession({ plannedMin: planned, checkpointFor: null, timeUpAt: 0 });
       stopTimeUpCountdown();
       chrome.runtime.sendMessage({ type: "SESSION_STARTED", checkinMin: m }).catch(() => {});
       await restoreClock();
@@ -1348,7 +1352,7 @@ async function sendWork(text) {
   renderThread();
   await saveThread();
   showWorkTyping();
-
+  try {
   const sessions = await FA.store.getSessions();
   const weekAgo = Date.now() - 7 * 86400000;
   const week = sessions.filter((s) => s.endedAt > weekAgo);
@@ -1384,6 +1388,12 @@ async function sendWork(text) {
   const { reply } = await Promise.resolve(FA.coach.chat(current.thread, context));
   $("work-typing")?.remove();
   await pushCoach(await applyDocOpsFromReply(reply, target, googleConnected));
+  } catch (e) {
+    console.warn("[Focus Agent] chat failed:", e.message);
+    await pushCoach("The coach didn't answer that one — try again in a sec.", { kind: "nudge" });
+  } finally {
+    $("work-typing")?.remove(); // never leave the dots pulsing
+  }
 }
 
 /**
@@ -1442,8 +1452,15 @@ async function explainToChat() {
   const a = current.assignment;
   showWorkTyping();
   const brainCtx = snapshot ? FA.snapshotForBrain(snapshot, { maxAssignments: 0 }) : null;
-  const r = await Promise.resolve(FA.coach.explain(a, brainCtx));
-  $("work-typing")?.remove();
+  let r;
+  try {
+    r = await Promise.resolve(FA.coach.explain(a, brainCtx));
+  } catch (e) {
+    console.warn("[Focus Agent] explain failed:", e.message);
+    return pushCoach("Couldn't explain that one right now — try again in a sec.", { kind: "nudge" });
+  } finally {
+    $("work-typing")?.remove();
+  }
   const lines = [(r.fromClaude ? "🧠 " : "") + r.tldr];
   if (r.wants.length) lines.push("what the teacher wants:\n• " + r.wants.join("\n• "));
   if (r.traps.length) lines.push("traps:\n• " + r.traps.join("\n• "));
@@ -3199,7 +3216,8 @@ async function showPendingDone(pd) {
   await chrome.storage.local.remove("pendingDone");
   await refreshAll();
   const a = assignments.find((x) => x.id === pd.assignmentId) || { id: pd.assignmentId, title: pd.title, estMin: pd.record?.plannedMin };
-  await renderDone(a, pd.record, true);
+  // Only a portal flip means the work is DONE; a time-up / idle / stop is just a session that ended.
+  await renderDone(a, pd.record, pd.reason === "portal");
   showView("done");
 }
 

@@ -21,6 +21,8 @@ importScripts(
   "lib/ai.js"
 );
 
+FA.google?.setInteractive?.(false); // the worker never opens a Google sign-in window on its own
+
 const CHECKIN_ALARM = "fa-checkin";
 const DETECT_ALARM = "fa-detect";       // completion detection, every minute during a session
 const DOC_STALE_MS = 8 * 60 * 1000;     // a doc untouched this long → "looks finished?"
@@ -162,7 +164,27 @@ chrome.runtime.onInstalled.addListener((details) => {
   reinjectContentScripts();
   // Poll commitments every minute so receipts arrive on time.
   chrome.alarms.create(COMMITMENT_ALARM, { periodInMinutes: 1 });
+  rearmActiveSession();
 });
+chrome.runtime.onStartup.addListener(rearmActiveSession);
+
+/**
+ * A session that was running when the extension reloaded/updated (or Chrome
+ * restarted) still has a clock -- but its alarms died with the old worker.
+ * Without this, nothing would ever stop it: no time-up, no idle watchdog,
+ * no completion polling. Exactly the runaway-clock bug the hard stop exists for.
+ */
+async function rearmActiveSession() {
+  try {
+    const session = await FA.store.getActiveSession();
+    if (!session) return;
+    await armTimeUpAlarm();
+    chrome.alarms.create(DETECT_ALARM, { periodInMinutes: 1 });
+    console.log(`[Focus Agent] re-armed the clock for "${session.title}" after a worker restart`);
+  } catch (e) {
+    console.warn("[Focus Agent] could not re-arm the active session:", e.message);
+  }
+}
 
 const PORTAL_MATCHES = ["https://*.blackbaud.com/*", "https://*.myschoolapp.com/*", "https://*.instructure.com/*", "https://classroom.google.com/*"];
 const CONTENT_JS = ["adapters/schema.js", "adapters/detect.js", "adapters/blackbaud.js", "adapters/canvas.js", "adapters/classroom.js", "lib/priority.js", "lib/snapshot.js", "lib/ai.js", "content.js", "overlay/coach-overlay.js"];
@@ -646,6 +668,7 @@ async function stopSession(session, endedBy, endedAt) {
     stepsDone: steps.filter((s) => s.done).length,
     stepsTotal: steps.length,
   });
+  if (!record) return; // the panel already ended it (45 s countdown vs notification button race)
   await chrome.storage.local.set({ pendingDone: { assignmentId: session.assignmentId, title: session.title, record, reason: endedBy, at: Date.now() } });
   const at = new Date(endedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   chrome.notifications.create(`fa-done-${Date.now()}`, {

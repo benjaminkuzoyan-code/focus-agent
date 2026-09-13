@@ -145,7 +145,10 @@
      * Assignments (the original feature)
      * ---------------------------------------------------------------- */
     async fetchAssignments({ includeFinished = false, monthsAhead = 4 } = {}) {
+      // Start two weeks back so OVERDUE work is in the list -- the whole "overdue
+      // goes first" rule was dead while dateStart was today.
       const today = new Date();
+      today.setDate(today.getDate() - 14);
       const end = new Date();
       end.setMonth(end.getMonth() + monthsAhead);
 

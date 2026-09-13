@@ -1,6 +1,6 @@
 # STATUS — rewritten by Claude Code at the end of every session
 
-**Updated:** 2026-09-12 (late) · **Version:** 0.8.11 (manifest) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+**Updated:** 2026-09-13 · **Version:** 0.8.12 (manifest) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
 
 ## This session: Codex review R1–R4 of 7c65bbd, all four fixed
 
@@ -33,6 +33,10 @@ Read the Doc into chat / precheck · create an outline doc (new doc, client-side
 ## Classroom: assignments only
 
 `adapters/classroom.js` scrapes the To-do page: title, course label, due date, link; points 0. **No grades, no materials/syllabus, no schedule.** Those do not exist and are not implied by Docs OAuth; they would need a separate Classroom API integration (Cloud project, Classroom scopes, school allow-listing for under-18 accounts) that has not been designed or verified.
+
+## 2026-09-13 batch one (full-check fixes, hard bugs)
+
+Fixed + regression-tested: clock alarms re-armed after a worker restart (`rearmActiveSession`); rules fallback no longer wipes the checklist / prints "first move: undefined" (`MockCoach.prototype.breakdown.call`); Classroom ids parsed from the href (stable across fetches); Blackbaud fetch starts 14 days back (overdue work appears); chunk chip below elapsed can't shorten the log; timeout/idle stops no longer replay as "completed"; worker never opens an interactive Google sign-in; typing indicator cleared in `finally` (work chat + explain); null-record guard in the worker's stop path; dead auto-complete toggle disabled. New `scripts/test-background.js` (14 cases: re-arm on startup/install, one-shot alarm, single chime, 45 s stop logs exactly planned minutes, extend, race with the panel). Full check list: `~/focus agent business/reviews/2026-09-12-full-check-claude.md`.
 
 ## Open items, in order
 
