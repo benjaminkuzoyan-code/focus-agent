@@ -158,6 +158,8 @@ function applyRoleUI() {
     : "Developer mode needs a coach server that recognises a developer code.";
   const modeRow = $("mode-select").closest(".settings-row");
   if (modeRow) modeRow.hidden = !dev; // the server forces tutor for everyone else anyway
+  const devRow = $("dev-mode-row");
+  if (devRow) devRow.hidden = !dev;   // students never see a "developer mode" row at all
   document.body.classList.toggle("dev", devAllowed());
 }
 
@@ -232,7 +234,7 @@ async function loadAssignments(retried = false) {
     sourceNotice = `⚠️ Cached assignments from ${new Date(cache.fetchedAt).toLocaleTimeString()} — ${why}. Refresh your portal tab, then hit ↻.`;
   } else {
     assignments = [];
-    sourceNotice = `Open your school portal in a tab (myPoly, Canvas, Classroom — or ⚙ → connect my school), then hit ↻. ${why}.`;
+    sourceNotice = `Open your school's assignment page in a tab (Blackbaud/myPoly, Canvas or Google Classroom), then tap ↻ up top. Other school? ⚙ → connect my school. (${why})`;
   }
 }
 
@@ -1498,7 +1500,7 @@ async function runPrecheck(draft) {
   showWorkTyping();
   const r = await Promise.resolve(FA.coach.precheck(current.assignment, draft));
   $("work-typing")?.remove();
-  const lines = [`${r.fromClaude ? "🧠 " : ""}estimate: ${r.grade}${r.fromClaude ? " (honest guess, not your teacher's grade)" : " — rules only; start the bridge for a real read"}`];
+  const lines = [`${r.fromClaude ? "🧠 " : ""}estimate: ${r.grade}${r.fromClaude ? " (honest guess, not your teacher's grade)" : " — simple mode can't really grade; turn on the smarter coach (⚙ → Coach) for a real read"}`];
   if (r.strengths.length) lines.push("working:\n• " + r.strengths.join("\n• "));
   for (const i of r.issues) lines.push(`${i.quote ? `“${i.quote}”\n` : ""}${i.problem}\n→ ${i.hint}`);
   if (r.missing.length) lines.push("not addressed yet:\n• " + r.missing.join("\n• "));
@@ -2144,7 +2146,7 @@ async function connectPortalFromTab() {
       return;
     }
     if (!d.supported) {
-      note.textContent = `${d.type === "unknown" ? "not a school portal we recognise" : d.type + " isn't supported yet"} — tap copy debug info and send it to Ben`;
+      note.textContent = `${d.type === "unknown" ? "not a school portal we recognise" : d.type + " isn't supported yet"} — tap copy debug info and send it to whoever gave you the extension`;
       return;
     }
     const { customPortals = {} } = await chrome.storage.local.get("customPortals");
@@ -2209,7 +2211,7 @@ async function copyDebugInfo() {
   const text = "Focus Agent debug info\n" + JSON.stringify(info, null, 2);
   try {
     await navigator.clipboard.writeText(text);
-    btn.textContent = "copied ✓ — paste it to Ben";
+    btn.textContent = "copied ✓ — send it to whoever gave you the extension";
   } catch {
     btn.textContent = "copy failed";
   }
@@ -2358,7 +2360,7 @@ $("voice-import-guide").addEventListener("click", async () => {
     scheduleVoiceRebuild();
     renderVoice();
   } catch {
-    note.textContent = "the bridge isn't running (python3 bridge/coach_server.py)";
+    note.textContent = "the coach server on this computer isn't reachable (developer)";
   }
 });
 $("voice-auto-toggle").addEventListener("change", async (e) => {
@@ -2624,13 +2626,13 @@ async function devMarkComplete(assignment) {
   for (const tab of tabs) {
     try {
       const res = await chrome.tabs.sendMessage(tab.id, { type: "MARK_COMPLETE", indexId });
-      if (res?.ok) return pushCoach("✓ ticked complete in myPoly.", { kind: "dev" });
-      return pushCoach(`myPoly mark-complete: ${res?.error || "failed"}`, { kind: "dev" });
+      if (res?.ok) return pushCoach("✓ ticked complete in your portal.", { kind: "dev" });
+      return pushCoach(`portal mark-complete: ${res?.error || "failed"}`, { kind: "dev" });
     } catch {
       /* next tab */
     }
   }
-  return pushCoach("No portal tab open — open myPoly and try again.", { kind: "dev" });
+  return pushCoach("No portal tab open — open your school portal and try again.", { kind: "dev" });
 }
 
 /** Auto-actions after done ✓ (Ben's build, opt-in). Returns lines for the done view. */
@@ -2642,7 +2644,7 @@ async function autoActionsOnDone(a, nextPick) {
     const tabs = await chrome.tabs.query({ url: PORTAL_URL_PATTERNS });
     if (tabs[0]) {
       const res = await chrome.tabs.sendMessage(tabs[0].id, { type: "MARK_COMPLETE", indexId });
-      lines.push(res?.ok ? "✓ ticked complete in myPoly" : `myPoly: ${res?.error || "not ticked"}`);
+      lines.push(res?.ok ? "✓ ticked complete in your portal" : `portal: ${res?.error || "not ticked"}`);
     }
   } catch {
     /* no portal tab */
@@ -2689,7 +2691,7 @@ async function finishWork(done, extra = {}) {
 /* ------------------------------------------------------------------ *
  * STATE C — done
  * ------------------------------------------------------------------ */
-const DONE_LABELS = { user: "done ✓", portal: "myPoly says it's done ✓", steps: "every step checked ✓", doc: "doc finished ✓", stop: "stopped — logged", idle: "clock stopped — you went quiet" };
+const DONE_LABELS = { user: "done ✓", portal: "your portal says it's done ✓", steps: "every step checked ✓", doc: "doc finished ✓", stop: "stopped — logged", idle: "clock stopped — you went quiet" };
 
 /**
  * Estimate calibration: how far this course's guesses run from reality, from
@@ -3063,11 +3065,11 @@ document.querySelectorAll(".mood").forEach((btn) =>
     await FA.store.updateActiveSession({ mood });
     const resp = $("mood-response");
     if (mood === "dread") {
-      resp.textContent = "Dread means it feels too big — that's the dread talking, not the task. Do the first step and nothing else. The feeling changes after you start.";
+      resp.textContent = "Feels too big? Just do step one, nothing else. It gets smaller once you start.";
       resp.classList.remove("hidden");
       setTimeout(() => resp.classList.add("hidden"), 15000);
     } else if (mood === "meh") {
-      resp.textContent = "Fair. Autopilot is fine — the checklist does the caring for you.";
+      resp.textContent = "Fair. You don't have to feel it — just follow the checklist.";
       resp.classList.remove("hidden");
       setTimeout(() => resp.classList.add("hidden"), 8000);
     }
@@ -3236,22 +3238,22 @@ function renderBrainBadge() {
     badge.title = "The coach server answered but didn't accept the access code — check ⚙ → access code.";
     return;
   }
-  badge.textContent = stale ? "🧠 bridge needs restart" : brain === "claude" ? `🧠 Claude (${engine}${h.hosted ? ", hosted" : ""})` : "⚙️ rules";
+  badge.textContent = stale ? "🧠 coach needs a restart" : brain === "claude" ? `🧠 smarter coach on${h.hosted ? "" : " (this computer)"}` : "simple mode";
   badge.title = stale
-    ? "The bridge's code changed since it was started — its prompts are out of date. Ctrl-C it and run: python3 bridge/coach_server.py"
+    ? "The coach server's code changed since it started — restart it (developer)."
     : brain === "claude"
       ? engine === "API"
-        ? `Real Claude brain over the API (${h.model || "claude"})${h.hosted ? " on Ben's server" : ""}`
-        : "Real Claude brain via headless Claude Code — slow. Put an API key in ~/.focus-agent/api_key and restart the bridge for the fast engine."
-      : "Rule-based coach — no coach server reachable. ⚙ → coach server: paste the address + access code from Ben, or run python3 bridge/coach_server.py on this computer.";
+        ? `The smarter coach is on (${h.model || "claude"})${h.hosted ? ", running on the coach server" : ""}.`
+        : "The smarter coach is on, running on this computer (developer setup)."
+      : "Simple mode: steps, the clock and your streak work; chat and explanations need the smarter coach. If you were given a coach link + code, paste them under ⚙ → Coach.";
 }
 
 (async () => {
   const brain = await FA.initCoach();
   const stale = brain === "claude" && FA.bridgeHealth?.stale;
   renderBrainBadge();
-  if (stale) {
-    sourceNotice = "⚠️ The coach bridge is running old code — restart it (Ctrl-C, then python3 bridge/coach_server.py) or new features won't reach the brain.";
+  if (stale && FA.bridgeHealth?.role === "dev") {
+    sourceNotice = "⚠️ The coach server is running old code — restart it (developer).";
     $("forecast-headline").textContent = sourceNotice;
   }
 

@@ -456,11 +456,11 @@
     const via = root.getElementById("via");
     if (!body) return;
     if (!r) {
-      body.textContent = "Couldn't summarize — no on-device model and the coach brain is offline.";
+      body.textContent = "Couldn't summarize — the coach is in simple mode right now.";
       return;
     }
     body.textContent = r.summary;
-    if (via) via.textContent = r.via === "chrome" ? "on-device (Chrome)" : r.via === "claude" ? "🧠 coach" : "rules only";
+    if (via) via.textContent = r.via === "chrome" ? "on-device (Chrome)" : r.via === "claude" ? "🧠 coach" : "simple mode";
     toThread(`≡ summary of “${text.slice(0, 60)}…”\n${r.summary}`, "summary");
   }
 
@@ -482,7 +482,7 @@
       const body = root.getElementById("body");
       body.innerHTML = typing;
       const r = await coach("askPassage", { quote: p.sel.exact.slice(0, 3000), question: q, title: pageTitle(), url: location.href });
-      body.textContent = r?.reply || "The coach brain is offline — start the bridge and ask again.";
+      body.textContent = r?.reply || "The coach is in simple mode right now — try again in a minute.";
       if (r?.reply) toThread(`? “${p.sel.exact.slice(0, 60)}…” — ${q}\n${r.reply}`, "ask");
     };
     input.addEventListener("keydown", (e) => e.key === "Enter" && send());

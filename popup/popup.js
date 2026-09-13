@@ -38,8 +38,8 @@ async function openPanel(startId) {
       $("next-meta").textContent = `${assignment.course} · ~${assignment.estMin} min — ${reason}`;
       $("start").disabled = false;
     } else {
-      $("next-title").textContent = ranked.length ? "Nothing pending 🏖️" : "No portal yet";
-      $("next-meta").textContent = ranked.length ? prefix + reason : "Open your school portal (myPoly, Canvas…) in a tab, then open the panel.";
+      $("next-title").textContent = ranked.length ? "Nothing pending 🏖️" : "Nothing here yet";
+      $("next-meta").textContent = ranked.length ? prefix + reason : "Open your school's assignment page (Blackbaud, Canvas or Google Classroom) in a tab, then open the panel and tap ↻.";
       $("start").disabled = true;
     }
   };

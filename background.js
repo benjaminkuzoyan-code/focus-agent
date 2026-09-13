@@ -758,7 +758,7 @@ async function completeSession(session, reason) {
   chrome.notifications.create(`fa-done-${Date.now()}`, {
     type: "basic",
     iconUrl: "icons/icon128.png",
-    title: reason === "portal" ? "myPoly says it's done ✓" : "Done ✓",
+    title: reason === "portal" ? "Your portal says it's done ✓" : "Done ✓",
     message: `"${session.title}" — ${record.actualMin} min this sitting. Session closed.`,
     priority: 1,
   });
