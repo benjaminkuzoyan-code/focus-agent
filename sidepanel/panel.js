@@ -137,18 +137,27 @@ $("snap-btn").addEventListener("click", () => snapScreen());
  * writing methods whatever the client sends, so this is belt-and-braces.
  */
 function devAllowed() {
-  return Boolean(settings?.devMode) && FA.bridgeHealth?.role !== "student";
+  // Positive, current authorization only: the server said "dev" for the
+  // exact server + code in settings right now. Missing, "none", "student",
+  // an old server that never says, or a health answer from a previous
+  // server/code all mean NO. The switch alone never grants anything.
+  const h = FA.bridgeHealth;
+  return Boolean(settings?.devMode) && Boolean(h) && h.role === "dev" && h.sig === FA.bridgeSig(settings?.bridgeUrl, settings?.bridgeToken);
 }
 
 /** Show/hide the developer controls to match the server's answer. */
 function applyRoleUI() {
-  const student = FA.bridgeHealth?.role === "student";
+  const h = FA.bridgeHealth;
+  const current = Boolean(h) && h.sig === FA.bridgeSig(settings?.bridgeUrl, settings?.bridgeToken);
+  const dev = current && h.role === "dev";
   const toggle = $("dev-toggle");
-  toggle.disabled = student;
+  toggle.disabled = !dev;
   toggle.checked = devAllowed();
-  toggle.title = student ? "Developer mode is the developer's only — the coach server decides, not this switch." : "";
+  toggle.title = dev ? "" : current && h.role === "student"
+    ? "Developer mode is the developer's only — the coach server decides, not this switch."
+    : "Developer mode needs a coach server that recognises a developer code.";
   const modeRow = $("mode-select").closest(".settings-row");
-  if (modeRow) modeRow.hidden = student; // the server forces tutor for students anyway
+  if (modeRow) modeRow.hidden = !dev; // the server forces tutor for everyone else anyway
   document.body.classList.toggle("dev", devAllowed());
 }
 
@@ -3078,7 +3087,9 @@ for (const [id, key] of [["bridge-url", "bridgeUrl"], ["bridge-token", "bridgeTo
     await FA.store.setSettings({ [key]: value });
     settings[key] = value;
     $("brain-badge").textContent = "🧠 checking…";
+    applyRoleUI();          // the old authorization is void the moment the server or code changes
     await FA.initCoach();
+    applyRoleUI();          // and only the fresh answer can restore it
     renderBrainBadge();
   });
 }

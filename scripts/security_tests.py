@@ -17,6 +17,10 @@ network) in an isolated HOME, then proves with plain HTTP calls that:
   * /voice/local on a hosted bridge       -> 404;  HEAD -> 404
   * hosted start without the API engine   -> refuses to start
   * open loopback bridge = developer; FA_LOCAL_ROLE=student flips it
+  * (R1-R4, Codex review of 7c65bbd) a hosted code NAMED local is a student;
+    negative / missing / lying Content-Length -> 4xx before the read; a
+    malformed image -> 400 before the model; provider refusals, crashes and
+    bad replies reach the client as fixed sentences and the log as a class
 
 Run: python3 scripts/security_tests.py        (exit 0 = all green)
 Every case is a real request against a real server process; "the prompt says
@@ -102,6 +106,19 @@ class Bridge:
                 return e.code, json.loads(txt), dict(e.headers)
             except json.JSONDecodeError:
                 return e.code, {"raw": txt}, dict(e.headers)
+
+    def raw_http(self, headers: str, body: bytes) -> str:
+        """Send a hand-built request (for Content-Length lies) and return the status line."""
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as sock:
+            sock.sendall(headers.encode() + body)
+            sock.shutdown(socket.SHUT_WR)
+            chunks = []
+            while True:
+                c = sock.recv(8192)
+                if not c:
+                    break
+                chunks.append(c)
+        return b"".join(chunks).split(b"\r\n", 1)[0].decode(errors="ignore")
 
     def coach(self, method: str, payload: dict, token: str | None, origin: str | None = EXT):
         return self.req("POST", "/coach", {"method": method, "payload": payload}, token=token, origin=origin)
@@ -203,10 +220,53 @@ def main() -> int:
         s, j, _ = b.coach("nope", {}, token=STU)
         check("unknown method -> 400", s == 400, f"{s}")
         s, j, _ = b.req("POST", "/coach", raw=b"{not json", token=STU, origin=EXT)
-        check("malformed JSON -> 500 with the error CLASS only", s == 500 and "JSONDecodeError" in j.get("error", "") and "not json" not in j.get("error", ""), f"{s} {j}")
+        check("malformed JSON -> 400 'bad request', no class, no echo", s == 400 and j.get("error") == "bad request", f"{s} {j}")
+
+        # --- R2: request framing + image validation, before any model call ---
+        before = b.calls()
+        body = json.dumps({"method": "chat", "payload": {"messages": [{"role": "user", "text": "x" * 250000}]}}).encode()
+        head = lambda cl: (f"POST /coach HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n"
+                           f"Content-Length: {cl}\r\nX-FA-Token: {STU}\r\nOrigin: {EXT}\r\nConnection: close\r\n\r\n")
+        st = b.raw_http(head("-1"), body)
+        check("negative Content-Length -> 4xx", " 4" in st, st)
+        st = b.raw_http(head("abc"), body)
+        check("non-numeric Content-Length -> 411", " 411" in st, st)
+        st = b.raw_http(head("10"), body)   # claims 10 bytes, sends 250k: only 10 are read → bad JSON → 400
+        check("understated Content-Length -> 400 (only the declared bytes are read)", " 400" in st, st)
+        st = b.raw_http(head("150000"), body[:100])   # under the cap, but claims more than it sends
+        check("overstated Content-Length -> 400 (body shorter than declared)", " 400" in st, st)
+        st = b.raw_http(head("300000"), body[:100])   # over the cap: refused before any read
+        check("overstated Content-Length above the cap -> 413", " 413" in st, st)
+        check("no model call for any framing attack", b.calls() == before, str(b.calls()))
+        s, j, _ = b.coach("readScreen", {"imageDataUrl": "data:image/png;base64,not-valid-base64!", "page": {}, "assignment": {}}, token=STU)
+        check("invalid base64 image -> 400, fixed message", s == 400 and "couldn't be read" in j.get("error", ""), f"{s} {j}")
+        s, j, _ = b.coach("readScreen", {"imageDataUrl": "data:text/html;base64,PGI+", "page": {}, "assignment": {}}, token=STU)
+        check("non-image data URL -> 400", s == 400, f"{s} {j}")
+        s, j, _ = b.coach("readScreen", {"imageDataUrl": "", "page": {}, "assignment": {}}, token=STU)
+        check("readScreen without an image -> 400", s == 400, f"{s} {j}")
+        check("no model call for bad images", b.calls() == before, str(b.calls()))
+        s, j, _ = b.coach("readScreen", {"imageDataUrl": IMG, "page": {}, "assignment": {}}, token=STU)
+        check("valid image still accepted", s == 200 and j.get("result", {}).get("image") is True, f"{s}")
+        s, j, _ = b.req("POST", "/coach", {"method": ["SYNTHETIC_STUDENT_TEXT_SENTINEL"], "payload": {}}, token=STU, origin=EXT)
+        check("method as a list -> 400 'unknown method' (no echo)", s == 400 and j.get("error") == "unknown method", f"{s} {j}")
+        s, j, _ = b.req("POST", "/coach", {"method": "chat", "payload": ["SYNTHETIC_STUDENT_TEXT_SENTINEL"]}, token=STU, origin=EXT)
+        check("payload as a list -> 400", s == 400, f"{s} {j}")
+        s, j, _ = b.req("POST", "/coach", raw=b"[1,2,3]", token=STU, origin=EXT)
+        check("JSON array body -> 400", s == 400, f"{s} {j}")
+
+        # --- R3: provider refusals / crashes / bad replies never leak text ---
+        s, j, _ = b.coach("chat", {"messages": [], "_mockFail": "refusal", "_sentinel": "SYNTHETIC_PRIVATE_REFUSAL_SENTINEL"}, token=STU)
+        check("provider refusal -> 422 + fixed sentence, explanation withheld", s == 422 and j.get("error") == "the coach declined that request", f"{s} {j}")
+        s, j, _ = b.coach("chat", {"messages": [], "_mockFail": "crash", "_sentinel": "SYNTHETIC_TRACEBACK_SENTINEL"}, token=STU)
+        check("unexpected exception -> 500 + generic sentence", s == 500 and j.get("error") == "the coach hit an error -- try again", f"{s} {j}")
+        s, j, _ = b.coach("chat", {"messages": [], "_mockFail": "badreply"}, token=STU)
+        check("unreadable model reply -> 500 + fixed sentence", s == 500 and "unreadable reply" in j.get("error", ""), f"{s} {j}")
     finally:
         log = b.stop()
-    check("server log carries names/methods, never request text", "write my essay" not in log and "x" * 100 not in log, "leaked")
+    for marker in ("write my essay", "x" * 100, "SYNTHETIC_STUDENT_TEXT_SENTINEL", "SYNTHETIC_PRIVATE_REFUSAL_SENTINEL", "SYNTHETIC_TRACEBACK_SENTINEL", "SYNTHETIC_DETAIL_SENTINEL", "not-valid-base64"):
+        check(f"server log never contains {marker[:28]!r}", marker not in log, "leaked")
+    check("server log uses pseudonymous ids, not the code's name", " amy " not in log and "amy chat" not in log and "amy writeStep" not in log, "name in log")
+    check("server log names only registered methods or 'invalid-method'", "invalid-method" in log or "[SYNTHETIC" not in log, "raw method logged")
 
     # --- revocation: same file-based codes, amy removed, restart ---
     print("== revocation (restart without amy) ==")
@@ -218,6 +278,25 @@ def main() -> int:
         check("surviving code still works", s == 200, f"{s}")
     finally:
         b2.stop()
+
+    # --- R4: a hosted code NAMED local is not the local developer ---
+    print("== hosted code named 'local' ==")
+    b_local = Bridge({"FA_TOKENS": f"local:{STU}"})
+    try:
+        s, j, _ = b_local.req("GET", "/health", token=STU, origin=EXT)
+        check("hosted token named local -> role student", j.get("role") == "student", str(j.get("role")))
+        s, j, _ = b_local.coach("writeStep", {"assignment": {}, "step": {"text": "intro"}}, token=STU)
+        check("hosted token named local: writeStep -> 403, no model call", s == 403 and b_local.calls() == 0, f"{s} calls={b_local.calls()}")
+    finally:
+        b_local.stop()
+    print("== reserved names refused at mint time ==")
+    home = Path(tempfile.mkdtemp(prefix="fa-sec-"))
+    for bad in ("local", "anon", "bad name", "x" * 41):
+        proc = subprocess.run([sys.executable, str(BRIDGE), "token", bad], env={"PATH": os.environ.get("PATH", ""), "HOME": str(home), "FA_ENGINE": "mock"}, capture_output=True, text=True, timeout=15)
+        check(f"token {bad[:12]!r} refused", proc.returncode != 0 and not (home / ".focus-agent" / "tokens").exists(), f"rc={proc.returncode}")
+    proc = subprocess.run([sys.executable, str(BRIDGE), "token", "amy"], env={"PATH": os.environ.get("PATH", ""), "HOME": str(home), "FA_ENGINE": "mock"}, capture_output=True, text=True, timeout=15)
+    check("token 'amy' minted", proc.returncode == 0 and "access code for amy" in proc.stdout, proc.stdout + proc.stderr)
+    shutil.rmtree(home, ignore_errors=True)
 
     # --- tokens file with the dev word ---
     print("== tokens file: 'name code dev' grants the role ==")

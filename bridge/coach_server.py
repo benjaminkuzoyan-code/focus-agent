@@ -30,6 +30,7 @@ MockCoach. Restart the server after editing this file (the panel shows
 """
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -89,6 +90,31 @@ ENGINE = "mock" if os.environ.get("FA_ENGINE") == "mock" else ("api" if _api_key
 MOCK_COUNT_FILE = Path(os.environ.get("FA_MOCK_COUNT_FILE", "")) if os.environ.get("FA_MOCK_COUNT_FILE") else None
 
 
+class CoachError(Exception):
+    """An error the client may see. `public` is a fixed, content-free
+    sentence; anything the provider or a traceback said stays in `detail`,
+    which is never sent and never logged (only its class is)."""
+
+    def __init__(self, public: str, detail: str = ""):
+        super().__init__(public)
+        self.public = public
+        self.detail = detail
+
+
+PUBLIC_DECLINED = "the coach declined that request"
+PUBLIC_BRAIN_DOWN = "the coach's brain isn't available right now -- try again in a minute"
+PUBLIC_BAD_REPLY = "the coach sent an unreadable reply -- try again"
+PUBLIC_GENERIC = "the coach hit an error -- try again"
+
+
+def _pseud(name) -> str:
+    """Log identifier for a caller: a short hash of the code's name, so logs
+    never carry a friend's name. Stable across restarts for the same name."""
+    if not name:
+        return "anon"
+    return hashlib.sha256(str(name).encode()).hexdigest()[:8]
+
+
 def _load_tokens():
     """({access code: name}, {names with the developer role}).
 
@@ -123,13 +149,17 @@ def _load_tokens():
 TOKENS, DEV_NAMES = _load_tokens()
 
 
-def _role(who) -> str:
-    """'dev' for the developer (an open loopback bridge, or a code marked dev),
-    'student' for everyone else. FA_LOCAL_ROLE=student lets the developer try
-    the student experience on their own machine."""
+def _role(who, open_local: bool = False) -> str:
+    """'dev' for the developer, 'student' for everyone else, 'none' for nobody.
+
+    Developer = the verified OPEN loopback bridge (no codes configured, not
+    hosted, peer is loopback -- i.e. the developer's own machine; this is a
+    property of the connection, never of a name) or a code marked dev. A
+    hosted code that happens to be NAMED "local" is just a student.
+    FA_LOCAL_ROLE=student lets the developer try the student experience."""
     if who is None:
         return "none"
-    if who == "local":
+    if open_local:
         return "student" if os.environ.get("FA_LOCAL_ROLE") == "student" else "dev"
     return "dev" if who in DEV_NAMES else "student"
 
@@ -163,6 +193,8 @@ def _count_call(name: str) -> bool:
 def mint_token(name: str, dev: bool = False) -> str:
     """Append a fresh access code for `name` to the tokens file and return it.
     dev=True marks the code with the developer role."""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", name) or name.lower() in ("local", "anon", "none"):
+        raise ValueError("name must be letters/digits/_ . - and not a reserved word (local, anon, none)")
     tok = secrets.token_urlsafe(18)
     TOKENS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with TOKENS_FILE.open("a") as f:
@@ -860,9 +892,14 @@ def _complete_api(system: str, prompt: str, image=None) -> str:
     )
     if resp.stop_reason == "refusal":
         details = getattr(resp, "stop_details", None)
-        why = getattr(details, "explanation", "") or ""
-        raise RuntimeError("the model declined this request" + (f": {why}" if why else ""))
+        _raise_refusal(getattr(details, "explanation", "") or "")
     return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+
+
+def _raise_refusal(explanation: str = ""):
+    """The provider's explanation of a refusal can quote the request; it is
+    kept as detail (never sent, never logged) behind one fixed sentence."""
+    raise CoachError(PUBLIC_DECLINED, detail=explanation)
 
 
 def _complete_cli(system: str, prompt: str, image=None) -> str:
@@ -906,7 +943,7 @@ def _complete_cli(system: str, prompt: str, image=None) -> str:
             except OSError:
                 pass
     if proc.returncode != 0:
-        raise RuntimeError(f"claude -p failed: {proc.stderr[:200]}")
+        raise CoachError(PUBLIC_BRAIN_DOWN, detail=proc.stderr[:200])
     return json.loads(proc.stdout).get("result", "").strip()
 
 
@@ -933,8 +970,11 @@ def ask_claude(prompt: str, system: str = COACH_IDENTITY, image=None):
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
-        raise ValueError("no JSON object in Claude reply")
-    return _parse_json_lenient(match.group(0))
+        raise CoachError(PUBLIC_BAD_REPLY, detail="no JSON object in reply")
+    try:
+        return _parse_json_lenient(match.group(0))
+    except json.JSONDecodeError as e:
+        raise CoachError(PUBLIC_BAD_REPLY, detail=str(e)[:100]) from e
 
 
 def _parse_json_lenient(text: str):
@@ -1021,10 +1061,10 @@ class Handler(SimpleHTTPRequestHandler):
             if auth.lower().startswith("bearer "):
                 tok = auth[7:].strip()
         if tok and tok in TOKENS:
-            return TOKENS[tok]
-        if not TOKENS and not HOSTED:
-            return "local"
-        return None
+            return TOKENS[tok], False
+        if not TOKENS and not HOSTED and self._is_loopback():
+            return "local", True   # the developer's own open bridge: a connection property, not a name
+        return None, False
 
     def _is_loopback(self):
         return self.client_address[0] in ("127.0.0.1", "::1")
@@ -1063,11 +1103,11 @@ class Handler(SimpleHTTPRequestHandler):
                 mtime = self.SOURCE.stat().st_mtime
             except OSError:
                 mtime = 0
-            who = self._who()
+            who, open_local = self._who()
             return self._send_json(200, {
                 "ok": True, "brain": "claude", "engine": ENGINE,
                 "hosted": HOSTED, "auth": bool(TOKENS), "who": who,
-                "role": _role(who),   # the panel hides developer controls unless this says dev
+                "role": _role(who, open_local),   # the panel enables developer controls only when this says dev
                 "model": API_MODEL if ENGINE == "api" else MODEL,
                 "started": int(self.STARTED), "sourceMtime": int(mtime),
                 "stale": mtime > self.STARTED,   # file edited since launch → restart me
@@ -1080,49 +1120,81 @@ class Handler(SimpleHTTPRequestHandler):
             return self._send_json(404, {"error": "unknown endpoint"})
         if not self._origin_ok():
             return self._send_json(403, {"error": "only the Focus Agent extension may call this bridge"})
-        who = self._who()
+        who, open_local = self._who()
         if who is None:
             return self._send_json(401, {"error": "access code missing or wrong (⚙ → coach server)"})
-        role = _role(who)
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-        except ValueError:
+        role = _role(who, open_local)
+        log_id = _pseud(who)
+        # Request framing first: the length must be an honest positive number
+        # under the cap, and the body must actually be that long. A negative
+        # or missing length used to slip a full-size body past the cap.
+        raw_len = (self.headers.get("Content-Length") or "").strip()
+        if not raw_len.isdigit():
+            return self._send_json(411, {"error": "bad request"})
+        length = int(raw_len)
+        if length < 2:
             return self._send_json(400, {"error": "bad request"})
         if length > MAX_BODY:
             return self._send_json(413, {"error": "that's too big to send the coach -- try a smaller screenshot or fewer files"})
+        body = self.rfile.read(length)
+        if len(body) != length:
+            return self._send_json(400, {"error": "bad request"})
         if not _count_call(who):
             return self._send_json(429, {"error": f"daily limit reached ({DAILY_CAP} coach calls) — resets at midnight UTC"})
         t0 = time.time()
-        method = "?"
+        method = "invalid-method"   # what the log says until the method is a registered name
         try:
-            req = json.loads(self.rfile.read(length))
-            method = req.get("method")
-            builder = BUILDERS.get(method)
-            if not builder:
-                return self._send_json(400, {"error": f"unknown method: {method}"})
+            try:
+                req = json.loads(body)
+            except json.JSONDecodeError:
+                return self._send_json(400, {"error": "bad request"})
+            if not isinstance(req, dict) or not isinstance(req.get("method"), str) or req["method"] not in BUILDERS:
+                return self._send_json(400, {"error": "unknown method"})
+            method = req["method"]
+            builder = BUILDERS[method]
+            raw_payload = req.get("payload", {})
+            if raw_payload is None:
+                raw_payload = {}
+            if not isinstance(raw_payload, dict):
+                return self._send_json(400, {"error": "bad request"})
             # The student/developer boundary, before any prompt exists:
             # writing methods are developer-only, and every other method runs
             # with the client's devMode/mode flags forced to tutor for students.
             if method in DEV_ONLY_METHODS and role != "dev":
-                print(f"[coach] {who} {method} refused (role {role})", flush=True)
+                print(f"[coach] {log_id} {method} refused (role {role})", flush=True)
                 return self._send_json(403, {"error": "that's a developer-only action -- the coach explains and checks your work, it doesn't write it"})
-            payload = _normalize_for_role(dict(req.get("payload", {}) or {}), role)
+            payload = _normalize_for_role(dict(raw_payload), role)
             # An image (photo of paper work, screenshot of the page) rides along
             # as a data URL; it goes to the model as a real image, never to disk
             # except for the claude -p engine's temp file.
             image = None
-            data_url = str(payload.pop("imageDataUrl", "") or "")
+            data_url = payload.pop("imageDataUrl", "") or ""
             if data_url:
-                m = re.match(r"data:image/(png|jpeg|jpg|webp);base64,(.+)", data_url, re.S)
+                m = re.match(r"data:image/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=\s]+)$", str(data_url), re.S)
                 if not m:
-                    return self._send_json(400, {"error": f"{method} needs imageDataUrl (png/jpeg/webp)"})
-                image = {"media_type": "image/" + m.group(1).replace("jpg", "jpeg"), "data": m.group(2)}
+                    return self._send_json(400, {"error": "that image couldn't be read -- try the screenshot again"})
+                b64 = re.sub(r"\s+", "", m.group(2))
+                try:
+                    decoded = base64.b64decode(b64, validate=True)
+                except (ValueError, base64.binascii.Error):
+                    return self._send_json(400, {"error": "that image couldn't be read -- try the screenshot again"})
+                if not decoded or len(decoded) > MAX_BODY:
+                    return self._send_json(400, {"error": "that image couldn't be read -- try the screenshot again"})
+                image = {"media_type": "image/" + m.group(1).replace("jpg", "jpeg"), "data": b64}
             elif method in ("readPhoto", "readScreen"):
                 return self._send_json(400, {"error": f"{method} needs imageDataUrl"})
             prompt, required = builder(payload)
             system = _system(payload)
             if ENGINE == "mock":
                 # Test engine: report what would have gone to the model, count it, send nothing.
+                # _mockFail lets the harness drive the error paths without a provider.
+                fail = payload.get("_mockFail")
+                if fail == "refusal":
+                    _raise_refusal("SYNTHETIC_PRIVATE_REFUSAL_SENTINEL " + str(payload.get("_sentinel", "")))
+                if fail == "crash":
+                    raise TypeError("SYNTHETIC_TRACEBACK_SENTINEL " + str(payload.get("_sentinel", "")))
+                if fail == "badreply":
+                    raise CoachError(PUBLIC_BAD_REPLY, detail="SYNTHETIC_DETAIL_SENTINEL")
                 if MOCK_COUNT_FILE:
                     with _usage_lock:
                         n = int(MOCK_COUNT_FILE.read_text() or 0) + 1 if MOCK_COUNT_FILE.exists() else 1
@@ -1139,21 +1211,24 @@ class Handler(SimpleHTTPRequestHandler):
                 }})
             if method == "chat":
                 reply = ask_claude_text(prompt, system, image)
-                print(f"[coach] {who} chat {ENGINE} {int((time.time() - t0) * 1000)}ms ok", flush=True)
+                print(f"[coach] {log_id} chat {ENGINE} {int((time.time() - t0) * 1000)}ms ok", flush=True)
                 return self._send_json(200, {"ok": True, "result": {"reply": reply}})
             result = ask_claude(prompt, system, image)
             missing = [k for k in required if k not in result]
             if missing:
-                return self._send_json(502, {"error": f"reply missing keys: {missing}"})
-            print(f"[coach] {who} {method} {ENGINE} {int((time.time() - t0) * 1000)}ms ok", flush=True)
+                print(f"[coach] {log_id} {method} {ENGINE} incomplete reply", flush=True)
+                return self._send_json(502, {"error": PUBLIC_BAD_REPLY})
+            print(f"[coach] {log_id} {method} {ENGINE} {int((time.time() - t0) * 1000)}ms ok", flush=True)
             return self._send_json(200, {"ok": True, "result": result})
         except Exception as e:  # noqa: BLE001 -- report anything to the client, safely
-            # Logs and the client get the error CLASS, never the raw text: SDK
-            # and JSON errors can quote the request, i.e. the student's work.
+            # The client gets a FIXED sentence (CoachError.public or the
+            # generic one); the log gets the pseudonymous caller, the
+            # registered method name and the error CLASS. Never str(e):
+            # provider explanations and JSON errors quote the request.
             kind = type(e).__name__
-            msg = str(e)[:300] if isinstance(e, RuntimeError) else f"the coach hit an error ({kind}) -- try again"
-            print(f"[coach] {who} {method} {ENGINE} {int((time.time() - t0) * 1000)}ms ERR {kind}", flush=True)
-            return self._send_json(500, {"error": msg})
+            msg = e.public if isinstance(e, CoachError) else PUBLIC_GENERIC
+            print(f"[coach] {log_id} {method} {ENGINE} {int((time.time() - t0) * 1000)}ms ERR {kind}", flush=True)
+            return self._send_json(500 if not isinstance(e, CoachError) or e.public != PUBLIC_DECLINED else 422, {"error": msg})
 
     def log_message(self, fmt, *args):
         # Quieter logs: only /coach traffic.
@@ -1165,7 +1240,10 @@ if __name__ == "__main__":
     if len(sys.argv) >= 3 and sys.argv[1] == "token":
         name = sys.argv[2]
         dev = len(sys.argv) >= 4 and sys.argv[3] == "dev"
-        tok = mint_token(name, dev)
+        try:
+            tok = mint_token(name, dev)
+        except ValueError as e:
+            sys.exit(f"can't mint a code: {e}")
         print(f"access code for {name}{' (developer role)' if dev else ''}: {tok}")
         print(f"(saved to {TOKENS_FILE}; restart the bridge to load it. Hosted on Fly? add it to FA_TOKENS instead.)")
         sys.exit(0)
