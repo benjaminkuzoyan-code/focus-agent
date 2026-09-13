@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <title>Focus Agent</title>
-  <link rel="stylesheet" href="panel.css" />
+  <link rel="stylesheet" href="/sidepanel/panel.css" />
 </head>
 <body>
   <!-- Slow-drifting gradient backdrop; everything floats above it -->
@@ -356,18 +356,21 @@
   </nav>
 
   <!-- Load order matters: schema → adapters → libs → panel logic -->
-  <script src="../adapters/schema.js"></script>
-  <script src="../lib/storage.js"></script>
-  <script src="../lib/priority.js"></script>
-  <script src="../lib/snapshot.js"></script>
-  <script src="../lib/docops.js"></script>
-  <script src="../lib/pdftext.js"></script>
-  <script src="../lib/voice.js"></script>
-  <script src="../lib/google.js"></script>
-  <script src="../lib/forecast.js"></script>
-  <script src="../lib/xp.js"></script>
-  <script src="../lib/ai.js"></script>
-  <script src="../lib/charts.js"></script>
-  <script src="panel.js"></script>
+  <script src="/scripts/harness/shim.js"></script>
+  <script src="/adapters/schema.js"></script>
+  <script src="/scripts/fixtures/mock-assignments.js"></script>
+  <script src="/scripts/harness/seed.js"></script>
+  <script src="/lib/storage.js"></script>
+  <script src="/lib/priority.js"></script>
+  <script src="/lib/snapshot.js"></script>
+  <script src="/lib/docops.js"></script>
+  <script src="/lib/pdftext.js"></script>
+  <script src="/lib/voice.js"></script>
+  <script src="/lib/google.js"></script>
+  <script src="/lib/forecast.js"></script>
+  <script src="/lib/xp.js"></script>
+  <script src="/lib/ai.js"></script>
+  <script src="/lib/charts.js"></script>
+  <script src="/sidepanel/panel.js"></script>
 </body>
 </html>

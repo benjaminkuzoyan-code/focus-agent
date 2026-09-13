@@ -87,7 +87,12 @@ $("highlight-btn").addEventListener("click", async () => {
     setTimeout(() => (btn.textContent = "🖍"), 2200);
   };
   if (/^chrome:|^chrome-extension:\/\/(?!.*viewer\/pdfjs)/.test(tab.url) && !tab.url.includes("/viewer/pdfjs/")) return flash("✕");
-  if (/docs\.google\.com\/document/.test(tab.url)) return flash("📄");
+  // Google Docs draws on a canvas (no text selection), and images have no
+  // text at all — those go the screenshot route instead of a dead end.
+  if (/docs\.google\.com\/(document|presentation|spreadsheets)/.test(tab.url) || /\.(png|jpe?g|gif|webp|bmp|svg)($|[?#])/i.test(tab.url)) {
+    flash("📸");
+    return snapScreen();
+  }
   const pdf = pdfSourceFor(tab.url);
   if (pdf && !tab.url.includes("/viewer/pdfjs/")) {
     // Ask for the PDF host now (still inside the click); the viewer has its
@@ -113,10 +118,12 @@ $("highlight-btn").addEventListener("click", async () => {
     }
     flash("✓");
   } catch (e) {
-    console.warn("[Focus Agent] can't highlight here:", e.message);
-    flash("✕");
+    console.warn("[Focus Agent] can't highlight here, trying a screenshot:", e.message);
+    flash("📸");
+    return snapScreen();
   }
 });
+$("snap-btn").addEventListener("click", () => snapScreen());
 
 /* ------------------------------------------------------------------ *
  * Data loading
@@ -667,6 +674,7 @@ async function enterWork(assignment) {
     steps: Array.isArray(m.steps) ? m.steps : [],
     thread: Array.isArray(m.thread) ? m.thread : [],
     files: Array.isArray(m.files) ? m.files : [],
+    tests: Array.isArray(m.tests) ? m.tests : [],
     awaitingDraft: false,
   };
   renderFiles();
@@ -718,10 +726,14 @@ async function restoreClock() {
     ring.style.strokeDashoffset = RING_C;
     ring.classList.remove("overtime", "idle");
     moodRow.classList.add("hidden");
+    stopTimeUpCountdown();
     return;
   }
   startBtn.classList.add("hidden");
   $("work-elapsed").classList.remove("dim");
+  // Reopened the panel mid "keep going?" window → resume the countdown (or stop now if it already ran out).
+  if (session.timeUpAt) startTimeUpCountdown(session);
+  else stopTimeUpCountdown();
   if (!session.mood && !session.moodSkipped) {
     moodRow.classList.remove("hidden");
     $("mood-response").classList.add("hidden");
@@ -746,14 +758,14 @@ async function restoreClock() {
     $("work-chunk").textContent = session.idleAskAt
       ? "still there? tap anything"
       : session.mode === "paper"
-        ? "paper mode — check-ins by notification" + stepTag
+        ? "paper mode — still stops at the planned end" + stepTag
         : elapsed <= chunk
           ? `${Math.ceil((chunk - elapsed) / 60)} min left${stepTag}`
-          : `past ${session.plannedMin} min — finish the thought${stepTag}`;
-    // Chunk boundary → one checkpoint in the thread (per chunk length).
-    if (elapsed >= chunk && !checkpointFired && session.checkpointFor !== session.plannedMin) {
+          : `time ⏰ — keep going or stop?${stepTag}`;
+    // Planned end → the one "keep going?" ask, then a hard stop (see onTimeUp).
+    if (elapsed >= chunk && !checkpointFired && !session.timeUpAt) {
       checkpointFired = true;
-      onChunkBoundary(session);
+      onTimeUp(session);
     }
   };
   tick();
@@ -770,7 +782,8 @@ function renderChunkChips(session) {
     b.title = `${m}-minute sitting`;
     b.classList.toggle("active", m === session.plannedMin);
     b.addEventListener("click", async () => {
-      await FA.store.updateActiveSession({ plannedMin: m, checkpointFor: null });
+      await FA.store.updateActiveSession({ plannedMin: m, checkpointFor: null, timeUpAt: 0 });
+      stopTimeUpCountdown();
       chrome.runtime.sendMessage({ type: "SESSION_STARTED", checkinMin: m }).catch(() => {});
       await restoreClock();
     });
@@ -779,37 +792,120 @@ function renderChunkChips(session) {
   $("chunk-why").textContent = session.chunkWhy || "";
 }
 
-/**
- * The visible checkpoint S04 asked for: at the end of a chunk the coach says
- * what got done and offers the next move. First boundary also decides paper
- * mode (no doc, no tab activity → the work is off-screen).
- */
-async function onChunkBoundary(session) {
-  await FA.store.updateActiveSession({ checkpointFor: session.plannedMin });
+/* ------------------------------------------------------------------ *
+ * Time's up — the hard stop (panel side).
+ *
+ * 25 minutes means 25. At the planned end: chime, one card asking "keep
+ * going?" with +5 / +10 / done / stop, and TIME_UP_GRACE_MS to answer. No
+ * answer → the clock stops AT the planned end, so the log never says
+ * 25-plus-whatever. The worker mirrors this with a notification + alarm for
+ * when the panel is closed; whoever gets there first sets session.timeUpAt
+ * and plays the chime, so it only sounds once.
+ * ------------------------------------------------------------------ */
+const TIME_UP_GRACE_MS = 45 * 1000;
+let timeUpTimer = null;
+const plannedEnd = (session) => session.startedAt + (session.plannedMin || 0) * 60000;
+
+/** Three rising tones via WebAudio — no asset to ship. */
+function playChime() {
+  try {
+    const ctx = new AudioContext();
+    [523.25, 659.25, 783.99].forEach((f, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "sine";
+      o.frequency.value = f;
+      const t = ctx.currentTime + i * 0.22;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.5, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+      o.connect(g).connect(ctx.destination);
+      o.start(t);
+      o.stop(t + 0.65);
+    });
+    setTimeout(() => ctx.close(), 1500);
+  } catch {
+    /* no audio here — the worker's chime covers it */
+  }
+}
+
+async function onTimeUp(session) {
+  const fresh = (await FA.store.getActiveSession()) || session;
+  if (!fresh.timeUpAt) {
+    await FA.store.updateActiveSession({ timeUpAt: Date.now() });
+    playChime();
+  }
+  // First boundary also decides paper mode (no doc, no tab activity → the work is off-screen).
+  if (fresh.mode !== "paper" && !fresh.paperChecked) {
+    const meta = await FA.store.getMeta();
+    const hasDoc = Boolean(meta?.[fresh.assignmentId]?.docUrl);
+    await FA.store.updateActiveSession({ paperChecked: true });
+    if (!hasDoc && (fresh.activityCount || 0) === 0) await FA.store.updateActiveSession({ mode: "paper" });
+  }
   const cur = current?.steps.find((s) => !s.done);
   const done = current?.steps.filter((s) => s.done).length || 0;
   const total = current?.steps.length || 0;
-
-  if (session.mode !== "paper" && !session.paperChecked) {
-    const meta = await FA.store.getMeta();
-    const hasDoc = Boolean(meta?.[session.assignmentId]?.docUrl);
-    await FA.store.updateActiveSession({ paperChecked: true });
-    if (!hasDoc && (session.activityCount || 0) === 0) {
-      await FA.store.updateActiveSession({ mode: "paper" });
-      await pushCoach("Looks like this one's on paper — I'll keep the clock and check in by notification. Tap done ✓ when it's finished, or mark it complete in myPoly and I'll notice.", { kind: "paper" });
-      await restoreClock();
-      return;
-    }
-  }
-
-  const head = `${session.plannedMin} min in — ${total ? `${done}/${total} steps` : "checkpoint"}.`;
-  const body = cur ? `Is “${cur.text}” done?` : "Everything on the list is checked. Turned in?";
+  const head = `⏰ ${fresh.plannedMin} min — that's the sitting.${total ? ` ${done}/${total} steps.` : ""}`;
+  const body = cur ? `Keep going on “${cur.text}”, or stop here?` : "Everything on the list is checked — done?";
   await pushCoach(`${head} ${body}`, {
-    kind: "checkpoint",
-    actions: cur
-      ? [{ label: "step done ✓", cmd: "step-done" }, { label: "+5 more", cmd: "more5" }, { label: "finish ✓", cmd: "finish" }]
-      : [{ label: "finish ✓", cmd: "finish" }, { label: "+5 more", cmd: "more5" }],
+    kind: "timeup",
+    actions: [
+      { label: "+5 min", cmd: "more5" },
+      { label: "+10 min", cmd: "more10" },
+      { label: cur ? "done ✓" : "finish ✓", cmd: "finish" },
+      { label: "stop", cmd: "stop-now" },
+    ],
   });
+  startTimeUpCountdown(await FA.store.getActiveSession());
+}
+
+/** Tick the "stopping in Ns" line; at zero, stop the clock at the planned end. */
+function startTimeUpCountdown(session) {
+  stopTimeUpCountdown();
+  if (!session?.timeUpAt) return;
+  const deadline = session.timeUpAt + TIME_UP_GRACE_MS;
+  const tick = async () => {
+    const left = Math.ceil((deadline - Date.now()) / 1000);
+    const c = [...document.querySelectorAll("#work-messages .msg.k-timeup .countdown")].pop();
+    if (c) c.textContent = left > 0 ? `stopping in ${left}s — tap +5 to keep going` : "stopping…";
+    if (left <= 0) {
+      stopTimeUpCountdown();
+      const s = await FA.store.getActiveSession();
+      if (s?.timeUpAt) {
+        const m = current?.thread.filter((x) => x.kind === "timeup").pop();
+        if (m) { m.used = true; await saveThread(); }
+        await finishWork(false, { endedBy: "timeup", endedAt: plannedEnd(s) });
+      }
+    }
+  };
+  tick();
+  timeUpTimer = setInterval(tick, 500);
+}
+
+function stopTimeUpCountdown() {
+  clearInterval(timeUpTimer);
+  timeUpTimer = null;
+}
+
+/** The "keep going?" card is answered — hide its buttons + countdown. */
+async function retireTimeUpCard() {
+  const m = current?.thread.filter((x) => x.kind === "timeup" && !x.used).pop();
+  if (!m) return;
+  m.used = true;
+  renderThread();
+  await saveThread();
+}
+
+/** "+N min": move the planned end, re-arm the worker's alarm, keep working. */
+async function extendClock(minutes) {
+  const s = await FA.store.getActiveSession();
+  if (!s) return startSession(current.assignment, minutes).then(restoreClock);
+  stopTimeUpCountdown();
+  await retireTimeUpCard();
+  await FA.store.updateActiveSession({ plannedMin: (s.plannedMin || 0) + minutes, timeUpAt: 0, checkpointFor: null });
+  chrome.runtime.sendMessage({ type: "SESSION_STARTED", checkinMin: minutes }).catch(() => {});
+  await restoreClock();
+  return pushCoach(`+${minutes}. Same step, no new tabs.`, { kind: "nudge" });
 }
 
 /* ---- files: the memory that survives switching tabs ----
@@ -830,7 +926,7 @@ function renderFiles() {
   for (const f of current.files) {
     const chip = document.createElement("span");
     chip.className = "file-chip" + (f.loading ? " loading" : "") + (f.error ? " error" : "");
-    const icon = f.kind === "gdoc" ? "📄" : f.kind === "pdf" ? "📕" : f.kind === "local" ? "📎" : "🌐";
+    const icon = f.kind === "gdoc" ? "📄" : f.kind === "pdf" ? "📕" : f.kind === "local" ? "📎" : f.kind === "snap" ? "📸" : "🌐";
     chip.innerHTML = `<span>${icon}</span><span class="f-title"></span><span class="f-size"></span><button class="f-x" title="detach">✕</button>`;
     chip.querySelector(".f-title").textContent = f.title || f.url || "file";
     chip.querySelector(".f-size").textContent = f.loading ? "reading…" : f.error ? "!" : f.chars ? `${Math.round(f.chars / 1000)}k` : "";
@@ -1131,6 +1227,13 @@ function renderThread() {
     el.className = "msg " + (m.role === "user" ? "me" : "coach") + (m.kind ? ` k-${m.kind}` : "");
     el.textContent = m.text;
     if (m.kind === "cards" && Array.isArray(m.cards)) renderCards(el, m.cards);
+    if (m.kind === "test" && m.testId) renderTest(el, m);
+    if (m.kind === "snap") renderSnap(el, m);
+    if (m.kind === "timeup" && !m.used) {
+      const c = document.createElement("span");
+      c.className = "countdown";
+      el.appendChild(c);
+    }
     if (m.actions?.length && !m.used) {
       const row = document.createElement("div");
       row.className = "msg-actions";
@@ -1376,13 +1479,17 @@ async function runChip(cmd) {
       return precheckToChat();
     case "stuck":
       return sendWork(cur ? `I'm stuck on this step: "${cur.text}". What's the smallest next thing I can do?` : "I'm stuck. What's the smallest next thing I can do?");
-    case "more5": {
+    case "more5":
+      return extendClock(5);
+    case "more10":
+      return extendClock(10);
+    case "stop-now": {
       const s = await FA.store.getActiveSession();
-      if (!s) return startSession(current.assignment, 5).then(restoreClock);
-      await FA.store.updateActiveSession({ plannedMin: (s.plannedMin || 0) + 5 });
-      await restoreClock();
-      return pushCoach("+5. Same step, no new tabs.", { kind: "nudge" });
+      stopTimeUpCountdown();
+      return finishWork(false, s?.timeUpAt ? { endedBy: "timeup", endedAt: plannedEnd(s) } : {});
     }
+    case "snap":
+      return snapScreen({ question: $("work-input").value.trim() });
     case "step-done": {
       if (cur) {
         cur.done = true;
@@ -1428,6 +1535,8 @@ async function runChip(cmd) {
       return sendWork(current.files.length ? "Quiz me on what's in my files. One question at a time." : "Quiz me on this topic. One question at a time.");
     case "flashcards":
       return makeFlashcards();
+    case "test":
+      return showPracticeTest();
     case "studyplan":
       return makeStudyPlan();
     case "dev-edit":
@@ -1502,6 +1611,461 @@ function renderCards(el, cards) {
   row.appendChild(b);
   el.appendChild(wrap);
   el.appendChild(row);
+}
+
+/* ------------------------------------------------------------------ *
+ * 📸 Screen annotate — for everything the text highlighter can't touch:
+ * Google Docs (canvas, no selection), Drive previews, images, diagrams,
+ * scanned pages. Screenshot the visible tab (our own pixels, nothing read
+ * from the page), let the student drag a region, send it to the brain:
+ * no question → a page overview (what it is, key ideas, questions to be
+ * able to answer, quotes worth highlighting); a question typed in the box
+ * → an answer about what's visible. The transcribed text joins the
+ * assignment's files so summaries / quizzes / practice tests can use it.
+ * Only ever user-initiated; the full image is never stored — a small
+ * thumbnail lives in the thread.
+ * ------------------------------------------------------------------ */
+async function snapScreen({ question = "" } = {}) {
+  if (!current) {
+    const b = $("snap-btn");
+    b.textContent = "open an assignment first";
+    setTimeout(() => (b.textContent = "📸"), 2200);
+    return;
+  }
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || !tab.url || /^chrome:/.test(tab.url)) return pushCoach("Switch to the tab you want me to look at, then tap 📸.");
+  // Screenshots need the site's permission (optional host permission, asked inside the click).
+  let origin = "";
+  try {
+    const u = new URL(tab.url);
+    if (/^https?:$/.test(u.protocol)) origin = u.origin;
+  } catch {
+    /* extension page etc. */
+  }
+  if (origin) {
+    try {
+      await chrome.permissions.request({ origins: [origin + "/*"] });
+    } catch {
+      /* captureVisibleTab will tell us */
+    }
+  }
+  // Drag-to-crop overlay; click = whole screen; Esc = cancel. Pages we can't inject into → whole screen.
+  let region = "all";
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["annotate/snip.js"] });
+    const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => globalThis.__faSnip() });
+    region = res?.result ?? null;
+    if (region === null) return; // Esc
+  } catch {
+    region = "all";
+  }
+  let shot;
+  try {
+    shot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+  } catch (e) {
+    return pushCoach(`Couldn't screenshot this tab (${e.message}). Chrome blocks a few pages — try “+ this tab” or the highlighter instead.`);
+  }
+  let full, thumb;
+  try {
+    ({ full, thumb } = await cropShot(shot, region));
+  } catch {
+    return pushCoach("Couldn't process the screenshot.");
+  }
+  showWorkTyping();
+  const page = { title: (tab.title || "").replace(/ - Google (Docs|Drive|Slides|Sheets)$/, ""), host: origin.replace(/^https?:\/\//, "") };
+  const r = await Promise.resolve(FA.coach.readScreen(current.assignment, full, { question, page }));
+  $("work-typing")?.remove();
+  if (!r.fromClaude) return pushCoach(r.error || "The coach couldn't read the screen.");
+  if (question) $("work-input").value = "";
+  // The page's text joins the files (once per page title + snap) so the rest of the coach can use it.
+  if (r.text && r.text.length > 40) {
+    const f = { id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), kind: "snap", title: `📸 ${page.title || page.host || "screen"}`, url: tab.url.split("#")[0] + "#snap" + Date.now().toString(36), text: r.text, chars: r.text.length, addedAt: Date.now() };
+    current.files.push(f);
+    renderFiles();
+    await saveFiles();
+  }
+  const text = question ? r.answer : r.what;
+  return pushCoach(text || "Here's what I see:", { kind: "snap", thumb, question, keyIdeas: r.keyIdeas, questions: r.questions, quotes: r.quotes });
+}
+
+/** Crop the capture to the dragged region (device pixels) and downscale; also make a thread thumbnail. */
+function cropShot(dataUrl, region) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let sx = 0, sy = 0, sw = img.width, sh = img.height;
+      if (region && region !== "all") {
+        const d = region.dpr || 1;
+        sx = Math.max(0, Math.round(region.x * d));
+        sy = Math.max(0, Math.round(region.y * d));
+        sw = Math.min(img.width - sx, Math.round(region.w * d));
+        sh = Math.min(img.height - sy, Math.round(region.h * d));
+      }
+      const draw = (maxW, q) => {
+        const scale = Math.min(1, maxW / sw);
+        const c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(sw * scale));
+        c.height = Math.max(1, Math.round(sh * scale));
+        c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+        return c.toDataURL("image/jpeg", q);
+      };
+      resolve({ full: draw(1600, 0.85), thumb: draw(360, 0.6) });
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+/** A snap message: thumbnail + the overview sections (or just the answer). */
+function renderSnap(el, m) {
+  if (m.thumb) {
+    const img = document.createElement("img");
+    img.className = "snap-img";
+    img.src = m.thumb;
+    img.alt = "screenshot";
+    el.insertBefore(img, el.firstChild);
+  }
+  const section = (label, items, numbered = false) => {
+    if (!items?.length) return;
+    const d = document.createElement("div");
+    d.className = "snap-sec";
+    const b = document.createElement("b");
+    b.textContent = label;
+    d.appendChild(b);
+    const ul = document.createElement(numbered ? "ol" : "ul");
+    for (const it of items) {
+      const li = document.createElement("li");
+      li.textContent = it;
+      ul.appendChild(li);
+    }
+    d.appendChild(ul);
+    el.appendChild(d);
+  };
+  if (m.question) {
+    const q = document.createElement("div");
+    q.className = "snap-sec";
+    q.textContent = `you asked: ${m.question}`;
+    el.insertBefore(q, el.firstChild);
+  }
+  section("key ideas", m.keyIdeas);
+  section("be able to answer", m.questions, true);
+  section("worth highlighting", m.quotes?.map((x) => `“${x}”`));
+}
+
+/* ------------------------------------------------------------------ *
+ * Practice test: a graded test inside the thread. Questions come from the
+ * brain (files + highlights), the student can add / edit / delete any of
+ * them, retake only the misses, ask for more or harder ones, and copy the
+ * whole thing into Quizlet. Tests persist per assignment (meta.tests), the
+ * thread message just points at one by id, so "clear chat" keeps the test.
+ * ------------------------------------------------------------------ */
+const Q_LETTERS = "ABCDEFGH";
+const Q_TYPE_LABEL = { mcq: "multiple choice", tf: "true / false", short: "short answer", flashcard: "flashcard" };
+
+async function saveTests() {
+  if (!current) return;
+  current.tests = current.tests.slice(-6);
+  await FA.store.patchAssignmentMeta(current.assignment.id, { tests: current.tests });
+}
+
+const qPrompt = (q) => (q.type === "flashcard" ? q.term : q.type === "tf" ? q.statement : q.question);
+const qAnswerText = (q) =>
+  q.type === "flashcard" ? q.definition : q.type === "mcq" ? `${Q_LETTERS[q.answer]}. ${q.choices[q.answer]}` : q.type === "tf" ? (q.answer ? "True" : "False") : q.answer;
+
+/** Chip: bring the latest test back, or build the first one. */
+async function showPracticeTest() {
+  const latest = current.tests[current.tests.length - 1];
+  if (latest) {
+    const last = current.thread[current.thread.length - 1];
+    if (last?.kind === "test" && last.testId === latest.id) return; // already on screen
+    return pushCoach(`Your practice test (${latest.questions.length} q). “new test” builds a fresh one.`, { kind: "test", testId: latest.id });
+  }
+  return buildPracticeTest({});
+}
+
+/** Build a new test, or extend the current one (`extend`) with more / harder / focused questions. */
+async function buildPracticeTest({ extend = null, count = 10, harder = false, topic = "" }) {
+  showWorkTyping();
+  const files = await filesForBrain();
+  const avoid = extend ? extend.questions.map(qPrompt) : [];
+  const r = await Promise.resolve(FA.coach.practiceTest(current.assignment, { files, count, harder, topic, avoid }));
+  $("work-typing")?.remove();
+  if (!r.questions?.length) return pushCoach(r.error || "Attach the reading or your notes (+ this tab) and I'll build a test from them.");
+  if (extend) {
+    extend.questions = [...extend.questions, ...r.questions].slice(0, 60);
+    await saveTests();
+    return pushCoach(`${r.fromClaude ? "🧠 " : ""}Added ${r.questions.length} ${harder ? "harder " : ""}questions — ${extend.questions.length} total now.`, { kind: "test", testId: extend.id });
+  }
+  const t = { id: "t" + Date.now().toString(36), title: r.title || "Practice test", questions: r.questions, attempts: [], lastMissed: [], createdAt: Date.now() };
+  current.tests.push(t);
+  await saveTests();
+  const mix = Object.entries(r.questions.reduce((m, q) => ((m[q.type] = (m[q.type] || 0) + 1), m), {})).map(([k, v]) => `${v} ${Q_TYPE_LABEL[k]}`).join(", ");
+  return pushCoach(`${r.fromClaude ? "🧠 " : ""}${r.questions.length} questions (${mix}). Answer, then submit — I'll grade it and you can retake just the misses. ✎ fixes any question; “+ my own” adds one.`, { kind: "test", testId: t.id });
+}
+
+/** The test card inside a thread message. `m.draft` keeps typed answers across re-renders. */
+function renderTest(el, m) {
+  const t = current?.tests.find((x) => x.id === m.testId);
+  if (!t) return;
+  // Only the newest message pointing at this test renders the whole thing.
+  const newest = current.thread.filter((x) => x.kind === "test" && x.testId === t.id).pop();
+  if (newest !== m) {
+    el.textContent = "practice test ↓ (it moved below)";
+    el.classList.add("k-nudge");
+    return;
+  }
+  m.draft = m.draft || {};
+  m.order = m.order || {};
+  const missedOnly = m.mode === "missed";
+  const qs = missedOnly ? t.questions.filter((q) => t.lastMissed.includes(q.id)) : t.questions;
+  const res = m.result || null;
+
+  const box = document.createElement("div");
+  box.className = "ptest";
+  const head = document.createElement("div");
+  head.className = "ptest-head";
+  const best = t.attempts.length ? Math.max(...t.attempts.map((a) => Math.round((100 * a.score) / a.total))) : null;
+  head.textContent = `${t.title} · ${qs.length} q${missedOnly ? " (misses only)" : ""}${best != null ? ` · best ${best}%` : ""}`;
+  box.appendChild(head);
+
+  qs.forEach((q, i) => {
+    const card = document.createElement("div");
+    card.className = "pq";
+    card.dataset.qid = q.id;
+    const graded = Boolean(res) && q.id in res.byId; // added after grading → not part of this attempt
+    const verdict = graded ? res.byId[q.id] : undefined;
+    if (verdict === true) card.classList.add("right");
+    if (verdict === false) card.classList.add("wrong");
+    const top = document.createElement("div");
+    top.className = "pq-top";
+    top.innerHTML = `<span class="pq-n"></span><button class="pq-edit" title="Edit this question">✎</button>`;
+    top.querySelector(".pq-n").textContent = `${i + 1} · ${Q_TYPE_LABEL[q.type]}`;
+    top.querySelector(".pq-edit").addEventListener("click", () => openQuestionEditor(card, t, q, m));
+    card.appendChild(top);
+    const prompt = document.createElement("div");
+    prompt.className = "pq-q";
+    prompt.textContent = q.type === "tf" ? `True or false: ${q.statement}` : qPrompt(q);
+    card.appendChild(prompt);
+
+    const locked = graded;
+    if (q.type === "mcq") {
+      if (!m.order[q.id]) m.order[q.id] = q.choices.map((_, k) => k).sort(() => Math.random() - 0.5);
+      m.order[q.id].forEach((k, pos) => {
+        if (k >= q.choices.length) return;
+        const lab = document.createElement("label");
+        lab.className = "choice";
+        const r = document.createElement("input");
+        r.type = "radio"; r.name = `pq-${m.testId}-${q.id}`; r.value = String(k); r.disabled = locked;
+        r.checked = m.draft[q.id] === String(k);
+        r.addEventListener("change", () => { m.draft[q.id] = r.value; });
+        lab.appendChild(r);
+        lab.appendChild(document.createTextNode(` ${Q_LETTERS[pos]}. ${q.choices[k]}`));
+        card.appendChild(lab);
+      });
+    } else if (q.type === "tf") {
+      ["true", "false"].forEach((v) => {
+        const lab = document.createElement("label");
+        lab.className = "choice";
+        const r = document.createElement("input");
+        r.type = "radio"; r.name = `pq-${m.testId}-${q.id}`; r.value = v; r.disabled = locked;
+        r.checked = m.draft[q.id] === v;
+        r.addEventListener("change", () => { m.draft[q.id] = r.value; });
+        lab.appendChild(r);
+        lab.appendChild(document.createTextNode(v === "true" ? " True" : " False"));
+        card.appendChild(lab);
+      });
+    } else {
+      const inp = document.createElement("input");
+      inp.type = "text"; inp.placeholder = q.type === "flashcard" ? "the definition" : "your answer"; inp.autocomplete = "off"; inp.disabled = locked;
+      inp.value = m.draft[q.id] || "";
+      inp.addEventListener("input", () => { m.draft[q.id] = inp.value; });
+      card.appendChild(inp);
+    }
+
+    if (graded) {
+      const v = document.createElement("div");
+      v.className = "pq-verdict";
+      if (verdict === true) v.textContent = "✓ correct";
+      else if (verdict === false) v.textContent = `✗ answer: ${qAnswerText(q)}`;
+      else {
+        v.textContent = `answer: ${qAnswerText(q)} `;
+        const yes = document.createElement("button"); yes.textContent = "I got it"; yes.className = "mini-btn";
+        const no = document.createElement("button"); no.textContent = "missed it"; no.className = "mini-btn";
+        yes.addEventListener("click", () => settleSelfMark(m, t, q.id, true));
+        no.addEventListener("click", () => settleSelfMark(m, t, q.id, false));
+        v.appendChild(yes); v.appendChild(no);
+      }
+      card.appendChild(v);
+      if (q.explanation && verdict !== true) {
+        const ex = document.createElement("div"); ex.className = "pq-expl"; ex.textContent = q.explanation; card.appendChild(ex);
+      }
+    }
+    box.appendChild(card);
+  });
+
+  if (res) {
+    const sc = document.createElement("div");
+    sc.className = "ptest-score";
+    sc.textContent = `Score: ${res.score} / ${res.total} (${Math.round((100 * res.score) / Math.max(res.total, 1))}%)${res.pending ? ` · ${res.pending} to self-mark` : ""}`;
+    box.appendChild(sc);
+  }
+
+  const row = document.createElement("div");
+  row.className = "msg-actions";
+  const btn = (label, fn, primary = false, title = "") => {
+    const b = document.createElement("button"); b.textContent = label; b.title = title; if (primary) b.className = "primary";
+    b.addEventListener("click", fn); row.appendChild(b); return b;
+  };
+  if (!res) btn("submit", () => gradeTest(m, t, qs), true);
+  else {
+    if (t.lastMissed.length) btn(`retake misses (${t.lastMissed.length})`, async () => { m.mode = "missed"; m.result = null; m.draft = {}; renderThread(); await saveThread(); }, true);
+    if (missedOnly) btn("whole test again", async () => { m.mode = "all"; m.result = null; m.draft = {}; renderThread(); await saveThread(); });
+    else btn("take again", async () => { m.result = null; m.draft = {}; m.order = {}; renderThread(); await saveThread(); });
+    btn("more like the misses", () => buildPracticeTest({ extend: t, count: 6, topic: t.lastMissed.length ? "the ideas behind these missed questions: " + t.questions.filter((q) => t.lastMissed.includes(q.id)).map(qPrompt).slice(0, 8).join(" | ") : "" }), false, "6 new questions on the same ideas");
+    btn("harder", () => buildPracticeTest({ extend: t, count: 6, harder: true }), false, "6 application-level questions");
+  }
+  btn("+ my own", () => openQuestionEditor(null, t, null, m), false, "Write a question yourself");
+  const qz = btn("copy for Quizlet", async () => {
+    const line = (s) => String(s || "").replace(/\t|\n/g, " ");
+    const tsv = t.questions
+      .map((q) => (q.type === "mcq" ? `${line(q.question)} ${q.choices.map((c, k) => `${Q_LETTERS[k]}. ${line(c)}`).join(" / ")}` : line(q.type === "tf" ? `True or false: ${q.statement}` : qPrompt(q))) + "\t" + line(qAnswerText(q)))
+      .join("\n");
+    try {
+      await navigator.clipboard.writeText(tsv);
+      qz.textContent = "copied ✓";
+      btn("open Quizlet ↗", () => chrome.tabs.create({ url: "https://quizlet.com/create-set", active: true }), false, "Create set → + Import → paste (tab / new line)");
+    } catch {
+      qz.textContent = "copy failed";
+    }
+  }, false, "Term ⇥ answer, one per line. Quizlet → Create set → + Import → paste.");
+  btn("new test", () => buildPracticeTest({}), false, "Build a fresh test from your files");
+  box.appendChild(row);
+  el.appendChild(box);
+}
+
+function gradeTest(m, t, qs) {
+  const byId = {};
+  let score = 0, pending = 0;
+  for (const q of qs) {
+    const d = m.draft[q.id];
+    let ok;
+    if (q.type === "mcq") ok = d != null && Number(d) === q.answer;
+    else if (q.type === "tf") ok = d != null && (d === "true") === q.answer;
+    else {
+      ok = FA.checkShortAnswer(q, d || "");
+      // A wrong-looking typed answer (or any flashcard) gets self-marked; blank = missed.
+      if (!ok && (q.type === "flashcard" || String(d || "").trim())) { ok = null; pending++; }
+    }
+    byId[q.id] = ok;
+    if (ok === true) score++;
+  }
+  m.result = { at: Date.now(), byId, score, total: qs.length, pending };
+  recordAttempt(m, t);
+  renderThread();
+  const wrap = $("work-messages");
+  wrap.querySelector(".ptest-score")?.scrollIntoView({ block: "nearest" });
+}
+
+async function settleSelfMark(m, t, qid, ok) {
+  if (!m.result || m.result.byId[qid] !== null) return;
+  m.result.byId[qid] = ok;
+  if (ok) m.result.score++;
+  m.result.pending = Math.max(0, m.result.pending - 1);
+  recordAttempt(m, t);
+  renderThread();
+}
+
+/** Latest attempt row on the test (self-marks update it in place). */
+function recordAttempt(m, t) {
+  const r = m.result;
+  const missed = Object.entries(r.byId).filter(([, ok]) => ok === false).map(([id]) => id);
+  const row = { at: r.at, score: r.score, total: r.total, missed };
+  const i = t.attempts.findIndex((a) => a.at === r.at);
+  if (i >= 0) t.attempts[i] = row; else t.attempts.push(row);
+  t.attempts = t.attempts.slice(-20);
+  // Misses carry over: a retake of the misses only clears what you got right this time.
+  const asked = new Set(Object.keys(r.byId));
+  t.lastMissed = [...new Set([...t.lastMissed.filter((id) => !asked.has(id) || r.byId[id] === false), ...missed])].filter((id) => t.questions.some((q) => q.id === id));
+  saveTests();
+  saveThread();
+}
+
+/**
+ * Inline editor for one question (or a new one when q is null). Type
+ * switches the fields; save validates through FA.normalizeQuestions so a
+ * half-filled question can't land on the test.
+ */
+function openQuestionEditor(card, t, q, m) {
+  document.querySelectorAll(".pq-editor").forEach((e) => e.remove());
+  const ed = document.createElement("div");
+  ed.className = "pq-editor";
+  const type = q?.type || "mcq";
+  ed.innerHTML = `
+    <select class="pe-type">
+      <option value="mcq">multiple choice</option><option value="tf">true / false</option>
+      <option value="short">short answer</option><option value="flashcard">flashcard</option>
+    </select>
+    <textarea class="pe-q" rows="2" placeholder="question / statement / term"></textarea>
+    <textarea class="pe-choices" rows="4" placeholder="choices, one per line"></textarea>
+    <input class="pe-answer" type="text" placeholder="answer" />
+    <input class="pe-accept" type="text" placeholder="other accepted answers, comma-separated" />
+    <input class="pe-expl" type="text" placeholder="explanation (optional)" />
+    <div class="msg-actions"><button class="primary pe-save">save</button><button class="pe-cancel">cancel</button>${q ? '<button class="pe-del">delete</button>' : ""}</div>`;
+  const sel = ed.querySelector(".pe-type");
+  sel.value = type;
+  const fill = () => {
+    const ty = sel.value;
+    ed.querySelector(".pe-choices").hidden = ty !== "mcq";
+    ed.querySelector(".pe-accept").hidden = ty !== "short";
+    const ans = ed.querySelector(".pe-answer");
+    ans.placeholder = ty === "mcq" ? "correct letter (A-D)" : ty === "tf" ? "true or false" : ty === "flashcard" ? "definition" : "answer";
+  };
+  sel.addEventListener("change", fill);
+  fill();
+  if (q) {
+    ed.querySelector(".pe-q").value = qPrompt(q);
+    ed.querySelector(".pe-choices").value = (q.choices || []).join("\n");
+    ed.querySelector(".pe-answer").value = q.type === "mcq" ? Q_LETTERS[q.answer] : q.type === "tf" ? String(q.answer) : q.type === "flashcard" ? q.definition : q.answer;
+    ed.querySelector(".pe-accept").value = (q.accept || []).join(", ");
+    ed.querySelector(".pe-expl").value = q.explanation || "";
+  }
+  ed.querySelector(".pe-cancel").addEventListener("click", () => ed.remove());
+  ed.querySelector(".pe-del")?.addEventListener("click", async () => {
+    t.questions = t.questions.filter((x) => x.id !== q.id);
+    t.lastMissed = t.lastMissed.filter((id) => id !== q.id);
+    if (m.result) { delete m.result.byId[q.id]; }
+    await saveTests();
+    renderThread();
+  });
+  ed.querySelector(".pe-save").addEventListener("click", async () => {
+    const ty = sel.value;
+    const text = ed.querySelector(".pe-q").value.trim();
+    const answer = ed.querySelector(".pe-answer").value.trim();
+    const raw = { type: ty, explanation: ed.querySelector(".pe-expl").value.trim() };
+    if (ty === "mcq") Object.assign(raw, { question: text, choices: ed.querySelector(".pe-choices").value.split("\n").map((c) => c.trim()).filter(Boolean), answer });
+    else if (ty === "tf") Object.assign(raw, { statement: text, answer });
+    else if (ty === "short") Object.assign(raw, { question: text, answer, accept: ed.querySelector(".pe-accept").value.split(",").map((c) => c.trim()).filter(Boolean) });
+    else Object.assign(raw, { term: text, definition: answer });
+    const [clean] = FA.normalizeQuestions([raw]);
+    if (!clean) {
+      ed.querySelector(".pe-save").textContent = ty === "mcq" ? "needs 2+ choices + a correct letter" : "needs a question and an answer";
+      return;
+    }
+    if (q) {
+      clean.id = q.id;
+      t.questions = t.questions.map((x) => (x.id === q.id ? clean : x));
+      delete m.order?.[q.id];
+    } else t.questions.push(clean);
+    await saveTests();
+    renderThread();
+  });
+  if (card) card.appendChild(ed);
+  else {
+    const box = document.querySelector(`#work-messages .ptest`);
+    (box || $("work-messages")).appendChild(ed);
+    ed.scrollIntoView({ block: "nearest" });
+  }
+  ed.querySelector(".pe-q").focus();
 }
 
 /* ------------------------------------------------------------------ *
@@ -2047,14 +2611,15 @@ async function autoActionsOnDone(a, nextPick) {
 }
 
 /* ---- finishing ---- */
-async function finishWork(done) {
+async function finishWork(done, extra = {}) {
   clearInterval(timerInterval);
   timerInterval = null;
+  stopTimeUpCountdown();
   const a = current?.assignment;
   const stepsDone = current?.steps.filter((s) => s.done).length || 0;
   const stepsTotal = current?.steps.length || 0;
 
-  const record = await FA.store.endSession(done ? "user" : "stop", { stepsDone, stepsTotal });
+  const record = await FA.store.endSession(done ? "user" : extra.endedBy || "stop", { stepsDone, stepsTotal, ...(extra.endedAt ? { endedAt: extra.endedAt } : {}) });
   await chrome.storage.local.remove("pendingDone").catch(() => {});
   chrome.runtime.sendMessage({ type: "SESSION_ENDED" }).catch(() => {});
 
@@ -2566,7 +3131,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.activeSession && current && $("view-work").classList.contains("active")) {
     const was = changes.activeSession.oldValue;
     const now = changes.activeSession.newValue;
-    if (Boolean(was?.idleAskAt) !== Boolean(now?.idleAskAt) || Boolean(was) !== Boolean(now)) restoreClock();
+    if (Boolean(was?.idleAskAt) !== Boolean(now?.idleAskAt) || Boolean(was?.timeUpAt) !== Boolean(now?.timeUpAt) || Boolean(was) !== Boolean(now) || was?.plannedMin !== now?.plannedMin) restoreClock();
   }
 });
 

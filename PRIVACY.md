@@ -17,6 +17,14 @@ grades, or anything else — and we can't sell what we never see.
 
 ## What Focus Agent reads
 
+- **Screenshots you take on purpose.** The 📸 button (and 🖍 on pages that
+  can't be highlighted, like Google Docs) takes a picture of the tab you're
+  looking at, only when you tap it, and only the region you drag. That image
+  goes to the coach's brain (your local bridge, or the hosted bridge and its
+  AI provider) once, so it can explain the page. It is not kept: only a small
+  thumbnail stays in that assignment's chat on your device. Nothing is ever
+  captured in the background.
+
 - **Your school portal** (Blackbaud, Canvas, or Google Classroom), using the
   login already in your browser. This happens on your device. Focus Agent
   never sees or asks for your portal password, and your login cookies never

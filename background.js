@@ -220,10 +220,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         break;
 
       case "SESSION_STARTED": {
-        const settings = await FA.store.getSettings();
-        chrome.alarms.create(CHECKIN_ALARM, {
-          periodInMinutes: message.checkinMin || settings.checkinMin,
-        });
+        // The clock has a hard end: one alarm at startedAt + plannedMin. When
+        // the panel is open it handles the boundary itself (to the second);
+        // this alarm is the backstop for a closed panel.
+        await armTimeUpAlarm(message.checkinMin);
         chrome.alarms.create(DETECT_ALARM, { periodInMinutes: 1 });
         detectTick = 0;
         sendResponse({ ok: true });
@@ -405,14 +405,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       chrome.alarms.clear(CHECKIN_ALARM);
       return;
     }
-    chrome.notifications.create(`fa-checkin-${Date.now()}`, {
-      type: "basic",
-      iconUrl: "icons/icon128.png",
-      title: "Focus check-in",
-      message: `Still on "${session.title}"?`,
-      buttons: [{ title: "Locked in 🔒" }, { title: "Got distracted 😬" }],
-      priority: 1,
-    });
+    await timeUp(session);
   }
 
   if (alarm.name === COMMITMENT_ALARM) {
@@ -420,6 +413,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 
   if (alarm.name === DETECT_ALARM) {
+    await timeUpWatch();
     await idleWatch();
     await detectCompletion();
   }
@@ -564,7 +558,82 @@ async function idleWatch() {
   if (now - session.idleAskAt >= IDLE_GRACE_MS) await stopSession(session, "idle", lastActiveAt);
 }
 
-/** Stop the clock from the worker (idle timeout or the notification's button). */
+/* ------------------------------------------------------------------ *
+ * Time's up — the hard stop.
+ *
+ * 25 minutes means 25. At the planned end: a chime, one "keep going?" ask
+ * (in the panel if it's open, always as a notification), and TIME_UP_GRACE_MS
+ * to answer. No answer → the clock stops AT the planned end, so the log says
+ * 25, never 25-plus-whatever. "+5" moves the end and re-arms everything.
+ * ------------------------------------------------------------------ */
+const TIME_UP_GRACE_MS = 45 * 1000;
+
+const plannedEnd = (session) => session.startedAt + (session.plannedMin || 0) * 60000;
+
+/** One alarm at the planned end (re-armed whenever plannedMin changes). */
+async function armTimeUpAlarm(fallbackMin) {
+  const session = await FA.store.getActiveSession();
+  chrome.alarms.clear(CHECKIN_ALARM);
+  if (!session) return;
+  const when = Math.max(Date.now() + 1000, plannedEnd(session));
+  if (session.plannedMin) chrome.alarms.create(CHECKIN_ALARM, { when });
+  else chrome.alarms.create(CHECKIN_ALARM, { delayInMinutes: fallbackMin || 25 });
+}
+
+/** The chime, from an offscreen document (a worker can't play audio itself). */
+async function chime() {
+  try {
+    const has = await chrome.offscreen.hasDocument?.();
+    if (!has) {
+      await chrome.offscreen.createDocument({
+        url: "offscreen/sound.html",
+        reasons: ["AUDIO_PLAYBACK"],
+        justification: "Plays the chime when a focus timer ends.",
+      });
+    }
+    await new Promise((r) => setTimeout(r, 150)); // let the document boot
+    chrome.runtime.sendMessage({ type: "PLAY_CHIME" }).catch(() => {});
+  } catch (e) {
+    console.warn("[Focus Agent] chime unavailable:", e.message);
+  }
+}
+
+/** Planned end reached. The panel may have handled it already (timeUpAt set). */
+async function timeUp(session) {
+  if (Date.now() < plannedEnd(session) - 2000) return armTimeUpAlarm(); // plannedMin grew since the alarm was set
+  const fresh = (await FA.store.getActiveSession()) || session;
+  if (!fresh.timeUpAt) {
+    await FA.store.updateActiveSession({ timeUpAt: Date.now() });
+    await chime();
+  }
+  chrome.notifications.create(`fa-timeup-${Date.now()}`, {
+    type: "basic",
+    iconUrl: "icons/icon128.png",
+    title: `Time ⏰ — ${fresh.plannedMin} min on "${fresh.title}"`,
+    message: "Keep going? The clock stops in 45 seconds unless you say so.",
+    buttons: [{ title: "+5 min" }, { title: "stop ✓" }],
+    priority: 2,
+    requireInteraction: true,
+  });
+}
+
+/** Every minute: an unanswered time's-up ask → stop at the planned end. */
+async function timeUpWatch() {
+  const session = await FA.store.getActiveSession();
+  if (!session) return;
+  if (session.timeUpAt && Date.now() - session.timeUpAt >= TIME_UP_GRACE_MS) {
+    await stopSession(session, "timeup", plannedEnd(session));
+  } else if (!session.timeUpAt && Date.now() >= plannedEnd(session) + 60000) {
+    await timeUp(session); // the end alarm got lost (worker restart) — ask now
+  }
+}
+
+async function extendSession(session, minutes) {
+  await FA.store.updateActiveSession({ plannedMin: (session.plannedMin || 0) + minutes, timeUpAt: 0, checkpointFor: null });
+  await armTimeUpAlarm();
+}
+
+/** Stop the clock from the worker (idle timeout, time's up, or a notification button). */
 async function stopSession(session, endedBy, endedAt) {
   chrome.alarms.clear(CHECKIN_ALARM);
   chrome.alarms.clear(DETECT_ALARM);
@@ -582,10 +651,12 @@ async function stopSession(session, endedBy, endedAt) {
   chrome.notifications.create(`fa-done-${Date.now()}`, {
     type: "basic",
     iconUrl: "icons/icon128.png",
-    title: endedBy === "idle" ? "Clock stopped" : "Stopped ✓",
+    title: endedBy === "idle" ? "Clock stopped" : endedBy === "timeup" ? "Time ⏰" : "Stopped ✓",
     message: endedBy === "idle"
       ? `"${session.title}" — ${record.actualMin} min logged, stopped at ${at} when things went quiet. ${idleMin} quiet min not counted.`
-      : `"${session.title}" — ${record.actualMin} min logged.`,
+      : endedBy === "timeup"
+        ? `"${session.title}" — ${record.actualMin} min, done. Clock stopped; open the panel to start another sitting.`
+        : `"${session.title}" — ${record.actualMin} min logged.`,
     priority: 1,
   });
 }
@@ -731,6 +802,14 @@ chrome.notifications.onButtonClicked.addListener(async (notifId, buttonIndex) =>
   if (notifId.startsWith("fa-commit-")) {
     const id = notifId.replace("fa-commit-", "");
     await FA.store.resolveCommitment(id, buttonIndex === 0);
+  }
+
+  if (notifId.startsWith("fa-timeup-")) {
+    const session = await FA.store.getActiveSession();
+    if (session) {
+      if (buttonIndex === 0) await extendSession(session, 5);
+      else await stopSession(session, "timeup", plannedEnd(session));
+    }
   }
 
   if (notifId.startsWith("fa-idle-")) {

@@ -731,6 +731,32 @@ body:not(.studying) .study { display: none !important; }
 .fcard.flip .a { display: block; }
 .fcard .hint { color: var(--muted); font-size: 10.5px; margin-top: 2px; }
 
+/* ---------- practice test (in-thread) ---------- */
+body.studying .chat-chip.test-chip { border-color: rgba(192, 132, 252, 0.45); color: #d8b4fe; }
+body:not(.studying) .chat-chips:not(.expanded) .chat-chip.test-chip { display: none; }
+.ptest { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.ptest-head { color: var(--muted); font-size: 11px; }
+.pq { background: var(--glass-strong); border: 1px solid transparent; border-radius: var(--r-sm); padding: 8px 10px; font-size: 12.5px; line-height: 1.45; }
+.pq.right { border-color: rgba(110, 231, 168, 0.55); }
+.pq.wrong { border-color: rgba(248, 113, 113, 0.55); }
+.pq-top { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 10.5px; }
+.pq-edit { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 0 2px; }
+.pq-edit:hover { color: var(--ink); }
+.pq-q { font-weight: 650; margin: 2px 0 6px; white-space: pre-wrap; }
+.pq .choice { display: block; padding: 3px 2px; cursor: pointer; }
+.pq input[type="text"], .pq-editor input[type="text"], .pq-editor textarea, .pq-editor select {
+  width: 100%; box-sizing: border-box; border-radius: var(--r-sm); border: 1px solid var(--edge); background: var(--glass);
+  color: var(--ink); padding: 6px 8px; font: inherit; font-size: 12px; margin-top: 4px;
+}
+.pq input[type="text"]:disabled { opacity: 0.7; }
+.pq-verdict { margin-top: 6px; font-weight: 650; display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+.pq.right .pq-verdict { color: var(--green); }
+.pq.wrong .pq-verdict { color: #fca5a5; }
+.pq-expl { color: var(--muted); font-size: 11.5px; margin-top: 3px; }
+.ptest-score { font-weight: 750; font-size: 13.5px; margin-top: 4px; }
+.pq-editor { margin-top: 8px; padding: 8px; border-radius: var(--r-sm); background: rgba(129, 140, 248, 0.1); border: 1px solid rgba(129, 140, 248, 0.3); }
+.pq-editor [hidden] { display: none !important; }
+
 #dev-badge { background: rgba(252, 211, 77, 0.18); color: var(--amber); border-color: rgba(252, 211, 77, 0.45); font-weight: 800; letter-spacing: 1px; font-size: 10px; }
 
 /* ---------- writing voice ---------- */
@@ -744,3 +770,13 @@ body:not(.studying) .study { display: none !important; }
 
 /* ---------- chat view (4th dock button) ---------- */
 .full-chat { min-height: 40vh; max-height: calc(100vh - 300px); overflow-y: auto; }
+
+/* ---------- 📸 screen annotate + ⏰ time's up ---------- */
+.msg.k-snap { border-color: rgba(192, 132, 252, 0.45); }
+.snap-img { display: block; max-width: 100%; border-radius: var(--r-sm); margin: 6px 0 8px; border: 1px solid var(--edge); }
+.snap-sec { margin-top: 6px; }
+.snap-sec b { color: var(--muted); font-size: 10.5px; letter-spacing: 0.6px; text-transform: uppercase; }
+.snap-sec ul { margin: 2px 0 0 16px; padding: 0; }
+.snap-sec li { margin: 2px 0; }
+.msg.k-timeup { border-color: rgba(252, 211, 77, 0.7); background: linear-gradient(140deg, rgba(252, 211, 77, 0.16), var(--glass)); font-weight: 600; }
+.msg.k-timeup .countdown { display: block; color: var(--amber); font-weight: 800; margin-top: 4px; }

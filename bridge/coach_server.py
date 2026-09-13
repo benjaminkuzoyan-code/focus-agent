@@ -366,11 +366,10 @@ def build_answer_all(p):
 
 
 def build_read_photo(p):
-    # The handler saved the photo to disk and put its path in p["imagePath"].
+    # The image rides along with the call (see _complete); nothing else to fetch.
     return (
-        f"Read the image file at {p.get('imagePath')} -- it is a photo of the student's "
-        "handwritten or paper work for this assignment. Use your file-reading tool "
-        "to look at it.\n\n"
+        "The image with this message is a photo of the student's handwritten or "
+        "paper work for this assignment.\n\n"
         f"Assignment: {json.dumps(p.get('assignment', {}))}\n"
         f"Their checklist (index, text, deliverable): {json.dumps(p.get('steps', []))}\n\n"
         "Decide which checklist steps the photo shows as DONE (the deliverable "
@@ -379,6 +378,37 @@ def build_read_photo(p):
         "judge. Reply JSON: {\"legible\": true|false, \"stepsDone\": [<indexes>], "
         "\"feedback\": \"<≤40 words>\"}"
     ), ["legible", "stepsDone", "feedback"]
+
+
+def build_read_screen(p):
+    """A screenshot of what the student has on screen (Google Doc, a Drive
+    preview, an image, a textbook page -- anything the text highlighter can't
+    reach). Two modes: no question -> a page overview a tutor would give;
+    a question -> answer it about what's visible. Both also transcribe the
+    visible text so the rest of the coach (summaries, quizzes, practice
+    tests) can use the page afterwards."""
+    page = p.get("page") or {}
+    question = str(p.get("question") or "").strip()
+    head = (
+        "The image with this message is a screenshot of what the student has on screen right now"
+        f" (page title: {json.dumps(page.get('title', ''))}, site: {json.dumps(page.get('host', ''))}).\n"
+        f"Assignment they're working on: {json.dumps(p.get('assignment', {}))}\n\n"
+        "Transcribe the main visible text faithfully (skip menus, sidebars, chrome; <= 1500 chars; "
+        "if it's a diagram or image, describe it in one or two sentences instead).\n"
+    )
+    if question:
+        return head + (
+            f"The student asks about this screen: {json.dumps(question)}\n"
+            "Answer it the way the help policy says (tutor mode: explain and guide, don't do graded work for them). "
+            'Reply JSON: {"answer": "<<= 120 words>", "text": "<transcription>"}'
+        ), ["answer"]
+    return head + (
+        "Give a page overview a good tutor gives before the student reads closely: "
+        "what this is (one line), the 3-5 key ideas in plain 9th-grade words, "
+        "2-3 questions the student should be able to answer after reading it (questions only, no answers), "
+        "and up to 4 short exact quotes from the page worth highlighting. "
+        'Reply JSON: {"what": "<one line>", "keyIdeas": ["..."], "questions": ["..."], "quotes": ["..."], "text": "<transcription>"}'
+    ), ["what", "keyIdeas"]
 
 
 def build_edit_doc(p):
@@ -419,6 +449,43 @@ def build_flashcards(p):
         "names and numbers. Prioritize anything they highlighted. 10-20 cards. "
         'Reply JSON: {"cards": [{"q": "<question or term>", "a": "<answer>"}]}'
     ), ["cards"]
+
+
+def build_practice_test(p):
+    """A structured practice test (mcq / true-false / short answer / flashcard)
+    from the student's files + highlights, in the same JSON shape the panel
+    grades locally. `avoid` lists prompts already on the student's test so a
+    'more questions' call doesn't repeat them; `topic` narrows the focus."""
+    files = p.get("files") or []
+    blocks = "\n\n".join(
+        f"### {f.get('title','file')}\n{str(f.get('text',''))[:8000]}"
+        + ("\nStudent highlights: " + json.dumps(f.get("highlights")) if f.get("highlights") else "")
+        for f in files[:6]
+    )
+    count = max(3, min(int(p.get("count") or 10), 25))
+    types = [t for t in (p.get("types") or []) if t in ("mcq", "tf", "short", "flashcard")] or ["mcq", "tf", "short"]
+    topic = str(p.get("topic") or "").strip()
+    avoid = [str(a)[:160] for a in (p.get("avoid") or [])][:60]
+    harder = bool(p.get("harder"))
+    return (
+        f"The student is studying for: {json.dumps(p.get('assignment', {}))}\n\n"
+        f"Their material:\n{blocks or '(no files attached -- use the assignment description, the course and what a 9th grader in that course is tested on)'}\n\n"
+        + (f"Focus only on: {topic}\n" if topic else "")
+        + (f"Do NOT repeat these questions (already on their test): {json.dumps(avoid)}\n" if avoid else "")
+        + ("Make these HARDER than a first pass: application, compare/contrast, 'which of these would happen if', multi-step. Still fair.\n" if harder else "")
+        + f"Write {count} practice-test questions of these types only: {', '.join(types)}. "
+        "Mix the types. Test what a teacher would actually ask on the real test: "
+        "understanding and application, not trivia. Prioritize anything the student highlighted. "
+        "Rules: mcq has 4 choices, exactly one right, distractors are plausible mistakes from the same topic, "
+        "no 'all of the above'; tf statements are unambiguous; short answers have ONE clear expected "
+        "answer plus 1-3 accepted alternates; flashcard = term/definition for vocab. One idea per "
+        "question. Explanation <= 20 words: why the answer is right or the trap. "
+        'Reply JSON: {"title": "<<= 6 words>", "questions": ['
+        '{"type":"mcq","question":"…","choices":["…","…","…","…"],"answer":<0-based index>,"explanation":"…"}, '
+        '{"type":"tf","statement":"…","answer":true,"explanation":"…"}, '
+        '{"type":"short","question":"…","answer":"…","accept":["…"],"explanation":"…"}, '
+        '{"type":"flashcard","term":"…","definition":"…"}]}'
+    ), ["questions"]
 
 
 def build_study_plan(p):
@@ -682,8 +749,10 @@ BUILDERS = {
     "writeStep": build_write_step,
     "answerAll": build_answer_all,
     "readPhoto": build_read_photo,
+    "readScreen": build_read_screen,
     "editDoc": build_edit_doc,
     "flashcards": build_flashcards,
+    "practiceTest": build_practice_test,
     "voiceProfile": build_voice_profile,
     "studyPlan": build_study_plan,
     "autopsy": build_autopsy,
@@ -709,15 +778,21 @@ def _api_client():
     return _client
 
 
-def _complete_api(system: str, prompt: str) -> str:
+def _complete_api(system: str, prompt: str, image=None) -> str:
     """One Claude API call. Thinking is adaptive by default on this model;
     effort is the latency knob. fallbacks='default' re-runs a classifier
-    decline on another model server-side instead of surfacing a refusal."""
+    decline on another model server-side instead of surfacing a refusal.
+    `image` = {"media_type": "image/jpeg", "data": "<base64>"} goes in as a
+    real image block so the model actually sees it (a photo of paper work, a
+    screenshot of the page the student is on)."""
+    content = [{"type": "text", "text": prompt}]
+    if image:
+        content.insert(0, {"type": "image", "source": {"type": "base64", "media_type": image["media_type"], "data": image["data"]}})
     resp = _api_client().messages.create(
         model=API_MODEL,
         max_tokens=16000,
         system=system,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[{"role": "user", "content": content}],
         extra_headers={"anthropic-beta": "server-side-fallback-2026-07-01"},
         extra_body={"fallbacks": "default", "output_config": {"effort": API_EFFORT}},
     )
@@ -728,7 +803,7 @@ def _complete_api(system: str, prompt: str) -> str:
     return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
 
 
-def _complete_cli(system: str, prompt: str) -> str:
+def _complete_cli(system: str, prompt: str, image=None) -> str:
     """One headless `claude -p` call with our own system prompt, no tools, no
     session file, no settings, from an empty directory -- as close to a bare
     model call as Claude Code gets while still using the login.
@@ -740,28 +815,46 @@ def _complete_cli(system: str, prompt: str) -> str:
     each call took 15s+ instead of ~3s. (--bare would also do it, but it skips
     keychain reads and so loses the login.)"""
     CLI_CWD.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run(
-        ["claude", "-p", "--model", MODEL, "--output-format", "json",
-         "--system-prompt", system, "--tools", "", "--no-session-persistence",
-         "--setting-sources", ""],
-        input=prompt,
-        capture_output=True,
-        text=True,
-        timeout=CLAUDE_TIMEOUT,
-        cwd=str(CLI_CWD),
-    )
+    tools = ["--tools", ""]
+    img_path = None
+    if image:
+        # claude -p can't take an image on stdin; drop it INSIDE the cwd and
+        # let the model read it with the (read-only) Read tool -- the only tool
+        # this call gets. Deleted right after.
+        ext = "png" if image["media_type"] == "image/png" else "webp" if image["media_type"] == "image/webp" else "jpg"
+        img_path = CLI_CWD / f"image-{int(time.time() * 1000)}.{ext}"
+        img_path.write_bytes(base64.b64decode(image["data"]))
+        tools = ["--tools", "Read", "--allowedTools", "Read"]
+        prompt = f"First, look at the image at {img_path} with your Read tool. Then:\n\n{prompt}"
+    try:
+        proc = subprocess.run(
+            ["claude", "-p", "--model", MODEL, "--output-format", "json",
+             "--system-prompt", system, *tools, "--no-session-persistence",
+             "--setting-sources", ""],
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=CLAUDE_TIMEOUT,
+            cwd=str(CLI_CWD),
+        )
+    finally:
+        if img_path:
+            try:
+                img_path.unlink()
+            except OSError:
+                pass
     if proc.returncode != 0:
         raise RuntimeError(f"claude -p failed: {proc.stderr[:200]}")
     return json.loads(proc.stdout).get("result", "").strip()
 
 
-def _complete(system: str, prompt: str) -> str:
-    return _complete_api(system, prompt) if ENGINE == "api" else _complete_cli(system, prompt)
+def _complete(system: str, prompt: str, image=None) -> str:
+    return _complete_api(system, prompt, image) if ENGINE == "api" else _complete_cli(system, prompt, image)
 
 
-def ask_claude_text(prompt: str, system: str = COACH_IDENTITY) -> str:
+def ask_claude_text(prompt: str, system: str = COACH_IDENTITY, image=None) -> str:
     """Run one Claude call and return the raw text reply."""
-    text = _complete(system, prompt)
+    text = _complete(system, prompt, image)
     # Only unwrap a reply that is ENTIRELY one fenced block. Stripping a trailing
     # fence unconditionally used to eat the closing ``` of a docops block at the
     # end of a reply, so the panel never saw it as a block.
@@ -771,9 +864,9 @@ def ask_claude_text(prompt: str, system: str = COACH_IDENTITY) -> str:
     return text
 
 
-def ask_claude(prompt: str, system: str = COACH_IDENTITY):
+def ask_claude(prompt: str, system: str = COACH_IDENTITY, image=None):
     """Run one Claude call and parse the JSON out of its reply."""
-    text = _complete(system, prompt)
+    text = _complete(system, prompt, image)
     # Claude was told JSON-only, but strip fences defensively.
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     match = re.search(r"\{.*\}", text, re.DOTALL)
@@ -911,24 +1004,25 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._send_json(400, {"error": f"unknown method: {method}"})
 
             payload = req.get("payload", {})
-            if method == "readPhoto":
-                # Photo arrives as a data URL; Claude reads files, not base64 blobs.
-                data_url = str(payload.pop("imageDataUrl", "") or "")
+            # An image (photo of paper work, screenshot of the page) rides along
+            # as a data URL; it goes to the model as a real image, never to disk
+            # except for the claude -p engine's temp file.
+            image = None
+            data_url = str(payload.pop("imageDataUrl", "") or "")
+            if data_url:
                 m = re.match(r"data:image/(png|jpeg|jpg|webp);base64,(.+)", data_url, re.S)
                 if not m:
-                    return self._send_json(400, {"error": "readPhoto needs imageDataUrl (png/jpeg/webp)"})
-                tmp_dir = Path.home() / ".focus-agent" / "tmp"
-                tmp_dir.mkdir(parents=True, exist_ok=True)
-                img = tmp_dir / f"photo-{int(time.time())}.{m.group(1).replace('jpeg', 'jpg')}"
-                img.write_bytes(base64.b64decode(m.group(2)))
-                payload["imagePath"] = str(img)
+                    return self._send_json(400, {"error": f"{method} needs imageDataUrl (png/jpeg/webp)"})
+                image = {"media_type": "image/" + m.group(1).replace("jpg", "jpeg"), "data": m.group(2)}
+            elif method in ("readPhoto", "readScreen"):
+                return self._send_json(400, {"error": f"{method} needs imageDataUrl"})
             prompt, required = builder(payload)
             system = _system(payload)
             if method == "chat":
-                reply = ask_claude_text(prompt, system)
+                reply = ask_claude_text(prompt, system, image)
                 print(f"[coach] {who} chat {ENGINE} {int((time.time() - t0) * 1000)}ms ok", flush=True)
                 return self._send_json(200, {"ok": True, "result": {"reply": reply}})
-            result = ask_claude(prompt, system)
+            result = ask_claude(prompt, system, image)
             missing = [k for k in required if k not in result]
             if missing:
                 return self._send_json(502, {"error": f"reply missing keys: {missing}"})
