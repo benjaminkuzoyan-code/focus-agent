@@ -152,12 +152,13 @@ function applyRoleUI() {
   const current = Boolean(h) && h.sig === FA.bridgeSig(settings?.bridgeUrl, settings?.bridgeToken);
   const dev = current && h.role === "dev";
   const toggle = $("dev-toggle");
+  if (!toggle) return document.body.classList.toggle("dev", false); // friends build: controls removed
   toggle.disabled = !dev;
   toggle.checked = devAllowed();
   toggle.title = dev ? "" : current && h.role === "student"
     ? "Developer mode is the developer's only — the coach server decides, not this switch."
     : "Developer mode needs a coach server that recognises a developer code.";
-  const modeRow = $("mode-select").closest(".settings-row");
+  const modeRow = $("mode-select")?.closest(".settings-row");
   if (modeRow) modeRow.hidden = !dev; // the server forces tutor for everyone else anyway
   const devRow = $("dev-mode-row");
   if (devRow) devRow.hidden = !dev;   // students never see a "developer mode" row at all
@@ -275,6 +276,7 @@ async function refreshAll() {
   ]);
 
   ranked = FA.rankAssignments(assignments, meta, sessions);
+  if (FA.storeError) sourceNotice = `⚠️ ${FA.storeError}`;
 
   renderStreak(sessions);
   renderForecast(meta, sessions);
@@ -1132,19 +1134,24 @@ async function filesForBrain() {
   const PER = 14000;
   let budget = 48000;
   const out = [];
-  const all = await chrome.storage.local.get(null);
+  // Only the highlight buckets for these files — not every key in storage
+  // (that pulled megabytes of threads and thumbnails on every message).
+  const keyFor = (f) => {
+    try {
+      const u = new URL(f.url);
+      return f.kind === "pdf" ? "fa-hl:" + f.url : "fa-hl:" + u.origin + u.pathname;
+    } catch {
+      return null; // local file
+    }
+  };
+  const keys = current.files.map(keyFor).filter(Boolean);
+  const all = keys.length ? await chrome.storage.local.get(keys) : {};
   for (const f of current.files) {
     if (!f.text) continue;
     const slice = f.text.slice(0, Math.min(PER, budget));
     budget -= slice.length;
-    let highlights = [];
-    try {
-      const u = new URL(f.url);
-      const key = f.kind === "pdf" ? "fa-hl:" + f.url : "fa-hl:" + u.origin + u.pathname;
-      highlights = (all[key] || []).map((h) => ({ quote: h.sel?.exact?.slice(0, 200), note: h.note || "" })).slice(0, 30);
-    } catch {
-      /* local file */
-    }
+    const key = keyFor(f);
+    const highlights = (key && all[key] ? all[key] : []).map((h) => ({ quote: h.sel?.exact?.slice(0, 200), note: h.note || "" })).slice(0, 30);
     out.push({ title: f.title || f.url, kind: f.kind, text: slice, truncated: f.text.length > slice.length, highlights });
     if (budget <= 0) break;
   }
@@ -3263,6 +3270,28 @@ async function showPendingDone(pd) {
 /* ------------------------------------------------------------------ *
  * Boot
  * ------------------------------------------------------------------ */
+/**
+ * The friends/pilot build ships a build.json ({"build":"friends"}); on that
+ * build every developer control is removed from the page at boot and the
+ * saved developer flag is cleared. The server refuses developer methods for
+ * student codes regardless -- this just keeps the UI honest.
+ */
+async function applyBuildFlag() {
+  try {
+    const res = await fetch(chrome.runtime.getURL("build.json"));
+    if (!res.ok) return;
+    const { build } = await res.json();
+    if (build !== "friends") return;
+    document.body.classList.add("friends-build");
+    document.querySelectorAll(".dev, #dev-mode-row, #dev-badge").forEach((el) => el.remove());
+    $("mode-select")?.closest(".settings-row")?.remove();
+    const s = await FA.store.getSettings();
+    if (s.devMode || s.autopilot || s.autoDone || s.nightlyPlan) await FA.store.setSettings({ devMode: false, autopilot: false, autoDone: false, nightlyPlan: false });
+  } catch {
+    /* no build.json = developer checkout */
+  }
+}
+
 /** The brain badge under ⚙: which coach is answering, and why if it isn't Claude. */
 function renderBrainBadge() {
   const brain = FA.coachBrain;
@@ -3286,6 +3315,7 @@ function renderBrainBadge() {
 }
 
 (async () => {
+  await applyBuildFlag();
   const brain = await FA.initCoach();
   const stale = brain === "claude" && FA.bridgeHealth?.stale;
   renderBrainBadge();
