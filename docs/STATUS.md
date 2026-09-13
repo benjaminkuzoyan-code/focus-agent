@@ -1,6 +1,6 @@
 # STATUS — rewritten by Claude Code at the end of every session
 
-**Updated:** 2026-09-13 · **Version:** 0.8.12 (manifest) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+**Updated:** 2026-09-13 · **Version:** 0.8.12 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
 
 ## This session: Codex review R1–R4 of 7c65bbd, all four fixed
 
