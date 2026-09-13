@@ -69,53 +69,90 @@
   <p class="updated">Last updated: [date of publication]</p>
 
   <div class="short">
-    <p><strong>The short version:</strong> Focus Agent runs on your device.
-    Your assignments, focus sessions, streaks, notes, and chat history stay
-    in your browser's local storage. We don't have a server that collects
-    your data. We can't see your assignments, your grades, or anything else
-    — and we can't sell what we never see.</p>
+    <p><strong>The short version:</strong> Focus Agent runs in your browser.
+    Your assignments, focus sessions, streaks, notes and chat history are
+    stored on your own computer. There is no account and no database of
+    students anywhere. The AI coach is the one thing that leaves your
+    computer: when you ask it something, the bits it needs are sent to a
+    coach server and from there to an AI provider (Anthropic), the answer
+    comes back, and nothing is kept on the way.</p>
   </div>
 
-  <h2>What Focus Agent reads</h2>
+  <h2>What Focus Agent reads on your computer</h2>
   <ul>
-    <li><strong>Your school portal's assignment list</strong> (Blackbaud,
-    Canvas, or Google Classroom), using the login already in your browser.
-    This happens on your device. Focus Agent never sees or asks for your
-    portal password.</li>
+    <li><strong>Your school portal</strong> (Blackbaud, Canvas or Google
+    Classroom), using the login already in your browser. It never sees or
+    asks for your password. It reads your assignments with the teacher's
+    instructions, class list and current grades, graded scores, schedule,
+    teacher-posted topics and (Blackbaud) your personal calendar-feed link.
+    Teacher email addresses are not kept.</li>
+    <li><strong>Web pages, PDFs and Google Docs you attach or highlight</strong>
+    for an assignment.</li>
+    <li><strong>Screenshots you take on purpose</strong> with the 📸 button:
+    only when you tap it, only the part you drag over. Nothing is captured
+    in the background.</li>
     <li><strong>Tab addresses during a focus session you started</strong>,
-    checked on your device against a built-in list of distracting sites, so
-    your coach can nudge you. This checking stops when your session ends.
-    Sites you visit are not logged by name anywhere except your own device's
-    session stats.</li>
+    checked on your computer against a fixed list of distracting sites.
+    Not sent anywhere.</li>
+    <li><strong>Whether your computer is idle</strong> during a session, so
+    a forgotten timer stops itself.</li>
   </ul>
 
-  <h2>What Focus Agent stores (on your device only)</h2>
-  <p>Focus sessions and their timing, streaks and XP, per-assignment notes
-  and time estimates, page annotations you draw, your chat messages with the
-  coach, and a cached copy of your assignment list. All of it lives in
-  Chrome's local extension storage. Uninstalling the extension deletes it.</p>
+  <h2>What is sent to the AI coach, and when</h2>
+  <p>Only when you use a coach feature (chat, explain, check my draft,
+  practice test, flashcards, summarize, 📸), and only what that feature
+  needs: the assignment's title, instructions and due date; course names,
+  grades as numbers and schedule times; the text of files, pages or Docs you
+  attached and your highlights; the screenshot you took; what you typed and
+  the recent conversation; your session statistics.</p>
+  <p><strong>Never</strong> your name, student id, email, teachers' contact
+  details, your calendar link or any password. The coach server stores none
+  of it: it forwards the request to Anthropic, returns the answer, and keeps a
+  log line with a time, the feature used and an anonymous id. Anthropic
+  processes the request under its own terms.</p>
+  <p><strong>Who runs the coach server.</strong> During the pilot, the student
+  who built Focus Agent runs it and pays for the AI. Each pilot user has a
+  personal code that can be switched off at any time. Without a code, Focus
+  Agent works in "simple mode" (checklist, timer, streaks, no chat) and sends
+  nothing anywhere.</p>
 
-  <h2>What Focus Agent sends off your device</h2>
-  <p><strong>Nothing.</strong> The current version has no server, no
-  analytics, no telemetry, no crash reporting, and no accounts.</p>
+  <h2>What Focus Agent stores on your computer only</h2>
+  <p>Focus sessions and timing, streaks, per-assignment notes, checklists,
+  chat history, practice tests, attached-file text, small thumbnails of
+  screenshots you took, page highlights, a cached copy of your assignment
+  list and portal snapshot, and, if you connect Google, a short-lived Google
+  access token. Uninstalling the extension deletes all of it. Finished
+  assignments have their chat, files and tests removed after 30 days.</p>
+
+  <h2>Google (optional)</h2>
+  <p>If you tap "connect G", Focus Agent asks Google, through Google's own
+  sign-in screen, for permission to read and edit Google Docs, to create
+  files it makes itself (per-file Drive access, not your whole Drive), and
+  to add calendar events. It uses this to read the doc you're working on,
+  create an outline doc, format a doc (styling only, your words are never
+  changed) and, if you choose, add focus blocks to your calendar. Disconnect
+  any time from the extension or your Google account settings.</p>
+
+  <h2>The rule that doesn't move</h2>
+  <p>Focus Agent is a tutor, not a ghostwriter. It explains, checks and
+  quizzes; it does not write assignments, and the coach server refuses those
+  requests for every pilot user. A separate developer mode exists only for the
+  person building it.</p>
 
   <h2>Students and parents</h2>
-  <p>Focus Agent is built for students, including students under 13. Because
-  the current version collects nothing and has no accounts, there is no
-  personal information for us to hold. If a future version adds accounts or
-  any data collection, we will require verifiable parental consent for users
-  under 13 (COPPA) before those features activate, and this policy will be
-  updated first.</p>
-  <p>Focus Agent helps students plan, start, and focus on their work. It is
-  deliberately designed <strong>not</strong> to do schoolwork for students,
-  and it declines requests to write assignments.</p>
+  <p>The pilot is for high-school students the developer knows personally,
+  with their parents aware. Focus Agent is not directed at children under 13.
+  If a future version is offered more widely, this policy will be updated
+  first and, where required, parental consent obtained before AI features are
+  enabled.</p>
 
   <h2>Your choices</h2>
   <ul>
+    <li>Don't enter a coach code, and nothing is ever sent anywhere.</li>
+    <li>Ask for your code to be switched off; the coach stops immediately.</li>
     <li>Uninstall anytime; local data is removed with the extension.</li>
-    <li>The distraction watcher only runs during sessions you start.</li>
-    <li>Annotations and chat history can be cleared from the extension
-    itself.</li>
+    <li>Clear chat, remove attached files and delete practice tests from
+    inside the extension.</li>
   </ul>
 
   <h2>Contact</h2>
@@ -123,8 +160,7 @@
 
   <h2>Changes</h2>
   <p>If this policy changes, the "Last updated" date changes, and material
-  changes will be called out in the extension's update notes before they
-  take effect.</p>
+  changes will be called out before they take effect.</p>
 </div>
 </body>
 </html>

@@ -1,6 +1,6 @@
 # STATUS — rewritten by Claude Code at the end of every session
 
-**Updated:** 2026-09-13 · **Version:** 0.8.15 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+**Updated:** 2026-09-13 · **Version:** 0.8.16 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
 
 ## This session: Codex review R1–R4 of 7c65bbd, all four fixed
 
@@ -44,6 +44,8 @@ Fixed + regression-tested: clock alarms re-armed after a worker restart (`rearmA
 - **First run + primary pick (0.8.14):** `renderFirstRun` (three steps with inline buttons, diagnostics behind a fold); `#pick-hero` = one full-width ▶ Smart Start for the coach's pick, above the time row.
 - **Packaging + storage (0.8.15):** `scripts/package-store.sh` ships `viewer/` + `offscreen/`, verifies every referenced path exists, prints a SHA-256; `--friends` writes `build.json` and the panel removes every developer control at boot (`applyBuildFlag`). `package.json`: `npm test` runs all four suites. Storage: quota errors surface as a notice; finished assignments lose thread/files/tests after 30 days; `filesForBrain` reads only the highlight keys it needs.
 - Built: `dist/focus-agent-0.8.15.zip` (store) and `-friends.zip`; 6.8 MB each (pdf.js). **Not yet installed on a fresh profile** — Ben's step.
+
+- **Google hygiene + honest docs (0.8.16):** OAuth scope `drive` → `drive.file` (the "from Drive" picker is developer-only now); teacher emails no longer stored; PRIVACY.md, PARENTS.md, STORE.md (permission table covers every manifest permission, description matches shipped features, "bridge is stripped" claim removed), `site/index.html` and `site/privacy.html` all describe what ships: the coach client ships, nothing is sent without a code, what is sent with one. Still placeholders: contact email, install link, policy date. **Not done:** manifest `key` (changes the extension ID → Ben must update the Google OAuth clients in the Cloud console first; decision card).
 
 ## Open items, in order
 
