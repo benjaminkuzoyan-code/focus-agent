@@ -129,17 +129,39 @@ $("snap-btn").addEventListener("click", () => snapScreen());
  * Data loading
  * ------------------------------------------------------------------ */
 
+/**
+ * Developer mode is a ROLE the coach server grants (an access code marked
+ * dev, or the developer's own open loopback bridge), not a checkbox. The
+ * checkbox only turns the developer chips on for someone the server already
+ * calls dev; for a student the server forces tutor mode and refuses the
+ * writing methods whatever the client sends, so this is belt-and-braces.
+ */
+function devAllowed() {
+  return Boolean(settings?.devMode) && FA.bridgeHealth?.role !== "student";
+}
+
+/** Show/hide the developer controls to match the server's answer. */
+function applyRoleUI() {
+  const student = FA.bridgeHealth?.role === "student";
+  const toggle = $("dev-toggle");
+  toggle.disabled = student;
+  toggle.checked = devAllowed();
+  toggle.title = student ? "Developer mode is the developer's only — the coach server decides, not this switch." : "";
+  const modeRow = $("mode-select").closest(".settings-row");
+  if (modeRow) modeRow.hidden = student; // the server forces tutor for students anyway
+  document.body.classList.toggle("dev", devAllowed());
+}
+
 /** Load assignments: a live portal tab first, else the last cached fetch. */
 async function loadAssignments(retried = false) {
   settings = await FA.store.getSettings();
   $("mode-select").value = settings.mode || "tutor";
-  $("dev-toggle").checked = Boolean(settings.devMode);
   $("bridge-url").value = settings.bridgeUrl || "";
   $("bridge-token").value = settings.bridgeToken || "";
   $("nightly-toggle").checked = Boolean(settings.nightlyPlan);
   $("autopilot-toggle").checked = Boolean(settings.autopilot);
   $("auto-done-toggle").checked = Boolean(settings.autoDone);
-  document.body.classList.toggle("dev", Boolean(settings.devMode));
+  applyRoleUI();
 
   sourceNotice = "";
 
@@ -565,7 +587,7 @@ async function smartStart(assignment, minOverride) {
   // 3. Smart Setup: read the instructions, open what they call for.
   const resources = await buildSetupResources(assignment);
   const meta = await FA.store.getMeta();
-  const autopilot = Boolean(settings.devMode && settings.autopilot);
+  const autopilot = Boolean(devAllowed() && settings.autopilot);
   let plan = meta?.[assignment.id]?.setupPlan || new FA.MockCoach().setup(assignment, resources);
   // What the plan SAYS to open, it opens. Autopilot opens everything relevant
   // and always wants the doc when written work is involved.
@@ -1387,7 +1409,7 @@ async function applyDocOpsFromReply(reply, target, googleConnected) {
   }
   const after = end > 0 ? text.slice(end).replace(/^\s*```/, "") : "";
   const rest = (text.slice(0, open) + (end > 0 ? after : "")).trim();
-  if (!settings.devMode) return rest || reply;
+  if (!devAllowed()) return rest || reply; // students never apply model-authored doc ops (the server never offers them either)
   if (end < 0) return `${rest}\n\n(the coach's doc edit was cut off before the JSON closed — ask it to send a shorter one)`;
   let block;
   try {
@@ -1685,7 +1707,7 @@ async function snapScreen({ question = "" } = {}) {
     await saveFiles();
   }
   const text = question ? r.answer : r.what;
-  return pushCoach(text || "Here's what I see:", { kind: "snap", thumb, question, keyIdeas: r.keyIdeas, questions: r.questions, quotes: r.quotes });
+  return pushCoach(text || "Here's what I see:", { kind: "snap", thumb, question, keyIdeas: r.keyIdeas, lookFor: r.lookFor, questions: r.questions, quotes: r.quotes });
 }
 
 /** Crop the capture to the dragged region (device pixels) and downscale; also make a thread thumbnail. */
@@ -1748,6 +1770,7 @@ function renderSnap(el, m) {
     el.insertBefore(q, el.firstChild);
   }
   section("key ideas", m.keyIdeas);
+  section("as you read, look for", m.lookFor);
   section("be able to answer", m.questions, true);
   section("worth highlighting", m.quotes?.map((x) => `“${x}”`));
 }
@@ -2364,7 +2387,8 @@ async function formatMyDoc() {
   try {
     const r = await FA.google.formatDoc(id, "mla");
     $("work-typing")?.remove();
-    return pushCoach(r.applied ? `✨ formatted: Times New Roman 12, double-spaced, 1" margins, title centered, paragraphs indented — ${r.paragraphs} paragraphs, words untouched.` : "The doc is empty — nothing to format yet.", { kind: "nudge" });
+    const { url } = await docTarget(current.assignment);
+    return pushCoach(r.applied ? `✨ formatted this assignment's doc: Times New Roman 12, double-spaced, 1" margins, title centered, paragraphs indented — ${r.paragraphs} paragraphs, your words untouched. Wrong doc? Undo with ⌘Z in the doc.` : "The doc is empty — nothing to format yet.", { kind: "nudge", links: url ? [url] : [] });
   } catch (e) {
     $("work-typing")?.remove();
     return pushCoach(`Couldn't format the doc: ${e.message}`);
@@ -2586,7 +2610,7 @@ async function devMarkComplete(assignment) {
 /** Auto-actions after done ✓ (Ben's build, opt-in). Returns lines for the done view. */
 async function autoActionsOnDone(a, nextPick) {
   const lines = [];
-  if (!settings.devMode || !settings.autoDone || !a) return lines;
+  if (!devAllowed() || !settings.autoDone || !a) return lines;
   try {
     const indexId = a.raw?.assignment_index_id ?? String(a.id).replace(/^blackbaud-/, "");
     const tabs = await chrome.tabs.query({ url: PORTAL_URL_PATTERNS });
@@ -3032,7 +3056,7 @@ $("mode-select").addEventListener("change", async (e) => {
 $("dev-toggle").addEventListener("change", async (e) => {
   await FA.store.setSettings({ devMode: e.target.checked });
   settings.devMode = e.target.checked;
-  document.body.classList.toggle("dev", e.target.checked);
+  applyRoleUI();
 });
 $("autopilot-toggle").addEventListener("change", async (e) => {
   await FA.store.setSettings({ autopilot: e.target.checked });
@@ -3203,6 +3227,7 @@ function renderBrainBadge() {
   }
 
   await loadAssignments();
+  applyRoleUI();
   await refreshAll();
   await loadChat();
   renderGoogleChip();

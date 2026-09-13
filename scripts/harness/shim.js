@@ -4,7 +4,8 @@
  * show you anything). Serve the repo root and open /scripts/harness/panel.html:
  *   python3 -m http.server 8766 --directory .
  * Storage is in-memory (window.__store); the fixture assignments are seeded.
- * The real bridge on 127.0.0.1:8000 is reachable, so brain calls work.
+ * The real bridge on 127.0.0.1:8000 is reachable only if it was started with
+ * FA_ALLOW_ORIGINS=http://localhost:8766 (the bridge refuses web-page origins).
  */
 const store = {};
 const changeListeners = [];

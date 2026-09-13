@@ -43,8 +43,17 @@ from pathlib import Path
 
 HOST = os.environ.get("FA_HOST", "127.0.0.1")           # 0.0.0.0 when hosted
 PORT = int(os.environ.get("PORT", os.environ.get("FA_PORT", "8000")))
-HOSTED = HOST != "127.0.0.1"
+# Hosted = serving other people's browsers. FA_HOSTED=1 forces hosted rules
+# while still binding loopback (the security tests use it).
+HOSTED = HOST != "127.0.0.1" or os.environ.get("FA_HOSTED") == "1"
 DAILY_CAP = int(os.environ.get("FA_DAILY_CAP", "300"))  # coach calls per access code per UTC day
+MAX_BODY = int(os.environ.get("FA_MAX_BODY", str(6 * 1024 * 1024)))  # bytes; a 1600px JPEG screenshot is ~300 KB
+# Extra browser origins allowed to call the bridge, for the developer's own
+# tools only (the panel harness served from http://localhost:8766). Never set
+# this on a hosted bridge.
+ALLOW_ORIGINS = {o.strip() for o in os.environ.get("FA_ALLOW_ORIGINS", "").split(",") if o.strip()}
+# Methods only the developer role may call: they produce finished work.
+DEV_ONLY_METHODS = {"writeStep", "answerAll", "editDoc"}
 TOKENS_FILE = Path.home() / ".focus-agent" / "tokens"
 MODEL = "opus"         # claude-cli engine: coaching quality matters more than speed
 CLAUDE_TIMEOUT = 150   # seconds; headless cold starts take a few seconds alone
@@ -73,13 +82,24 @@ def _api_key() -> str:
         return ""
 
 
-ENGINE = "api" if _api_key() else "claude-cli"
+# FA_ENGINE=mock: no model at all -- replies describe what WOULD have been
+# sent (role, policy, prompt facts) and count calls, so the security tests can
+# prove a rejected request never reaches a model. Never used for real serving.
+ENGINE = "mock" if os.environ.get("FA_ENGINE") == "mock" else ("api" if _api_key() else "claude-cli")
+MOCK_COUNT_FILE = Path(os.environ.get("FA_MOCK_COUNT_FILE", "")) if os.environ.get("FA_MOCK_COUNT_FILE") else None
 
 
 def _load_tokens():
-    """{access code: name}. From FA_TOKENS="alice:code1,bob:code2" and/or
-    ~/.focus-agent/tokens (one `name code` per line). Empty + local = open."""
-    out = {}
+    """({access code: name}, {names with the developer role}).
+
+    Codes come from FA_TOKENS="alice:code1,bob:code2" and/or
+    ~/.focus-agent/tokens (one `name code` per line, or `name code dev`).
+    The developer role -- the only role that can turn on developer mode,
+    answer mode, or the writing methods -- is granted by that `dev` word or
+    by FA_DEV_TOKENS="ben,otherdev" (names). Empty codes + loopback = open,
+    and an open loopback bridge is the developer's own machine.
+    """
+    out, devs = {}, set()
     for pair in os.environ.get("FA_TOKENS", "").split(","):
         if ":" in pair:
             name, tok = pair.split(":", 1)
@@ -88,14 +108,42 @@ def _load_tokens():
     try:
         for line in TOKENS_FILE.read_text().splitlines():
             parts = line.split()
-            if len(parts) == 2 and not line.lstrip().startswith("#"):
+            if len(parts) >= 2 and not line.lstrip().startswith("#"):
                 out[parts[1]] = parts[0]
+                if len(parts) >= 3 and parts[2].lower() == "dev":
+                    devs.add(parts[0])
     except OSError:
         pass
-    return out
+    for name in os.environ.get("FA_DEV_TOKENS", "").split(","):
+        if name.strip():
+            devs.add(name.strip())
+    return out, devs
 
 
-TOKENS = _load_tokens()
+TOKENS, DEV_NAMES = _load_tokens()
+
+
+def _role(who) -> str:
+    """'dev' for the developer (an open loopback bridge, or a code marked dev),
+    'student' for everyone else. FA_LOCAL_ROLE=student lets the developer try
+    the student experience on their own machine."""
+    if who is None:
+        return "none"
+    if who == "local":
+        return "student" if os.environ.get("FA_LOCAL_ROLE") == "student" else "dev"
+    return "dev" if who in DEV_NAMES else "student"
+
+
+def _normalize_for_role(payload: dict, role: str) -> dict:
+    """The server decides what the client is allowed to ask for. A student
+    payload can say devMode:true or mode:'answer' all it likes; here it
+    becomes tutor mode before any prompt is built. This is the boundary."""
+    payload["_role"] = role
+    if role != "dev":
+        payload["devMode"] = False
+        payload["mode"] = "tutor"
+        payload.pop("voice", None)          # only hand-in text uses the voice profile; students get none written
+    return payload
 _usage = {}          # (name, utc day) -> calls today
 _usage_lock = threading.Lock()
 
@@ -112,12 +160,13 @@ def _count_call(name: str) -> bool:
     return n <= DAILY_CAP
 
 
-def mint_token(name: str) -> str:
-    """Append a fresh access code for `name` to the tokens file and return it."""
+def mint_token(name: str, dev: bool = False) -> str:
+    """Append a fresh access code for `name` to the tokens file and return it.
+    dev=True marks the code with the developer role."""
     tok = secrets.token_urlsafe(18)
     TOKENS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with TOKENS_FILE.open("a") as f:
-        f.write(f"{name} {tok}\n")
+        f.write(f"{name} {tok}{' dev' if dev else ''}\n")
     return tok
 
 COACH_IDENTITY = (
@@ -402,6 +451,19 @@ def build_read_screen(p):
             "Answer it the way the help policy says (tutor mode: explain and guide, don't do graded work for them). "
             'Reply JSON: {"answer": "<<= 120 words>", "text": "<transcription>"}'
         ), ["answer"]
+    if p.get("_role") != "dev":
+        # Students get ORIENTATION, never the annotation itself: for an
+        # annotation assignment, "key ideas" and "quotes worth highlighting"
+        # would be the assessed work. The coach reacts to their reading; it
+        # doesn't do it for them.
+        return head + (
+            "Orient the student before they read closely, WITHOUT doing the reading for them: "
+            "what this is (one line), what to look for as they read (2-3 short pointers: the kind of "
+            "thing a teacher wants noticed here -- claims, evidence, turns, vocabulary -- not the content itself), "
+            "and 2-3 questions they should be able to answer after reading (questions only, no answers). "
+            "Do NOT list key ideas, do NOT pick quotes, do NOT summarize the argument. "
+            'Reply JSON: {"what": "<one line>", "lookFor": ["..."], "questions": ["..."], "text": "<transcription>"}'
+        ), ["what"]
     return head + (
         "Give a page overview a good tutor gives before the student reads closely: "
         "what this is (one line), the 3-5 key ideas in plain 9th-grade words, "
@@ -909,12 +971,29 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(PROJECT_ROOT), **kwargs)
 
+    # Only the extension may talk to the bridge from a browser. Extension
+    # pages send Origin: chrome-extension://<id>; web pages send their site,
+    # which is refused. curl and the SDK send no Origin and are allowed
+    # (they still need a code). Echoing the origin instead of "*" is what
+    # makes the browser enforce this too.
+    def _origin(self):
+        return (self.headers.get("Origin") or "").strip()
+
+    def _origin_ok(self):
+        o = self._origin()
+        return not o or o.startswith("chrome-extension://") or o in ALLOW_ORIGINS
+
+    def _cors(self):
+        o = self._origin()
+        self.send_header("Access-Control-Allow-Origin", o if (o.startswith("chrome-extension://") or o in ALLOW_ORIGINS) else "null")
+        self.send_header("Vary", "Origin")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-FA-Token")
+
     def _send_json(self, code, obj):
         body = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-FA-Token")
+        self._cors()
         self.send_header("Content-Length", str(len(body)))
         try:
             self.end_headers()
@@ -923,10 +1002,14 @@ class Handler(SimpleHTTPRequestHandler):
             pass  # the panel gave up waiting (its own timeout) -- nothing to tell it
 
     def do_OPTIONS(self):
-        self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_response(204 if self._origin_ok() else 403)
+        self._cors()
         self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-FA-Token")
+        self.end_headers()
+
+    def do_HEAD(self):
+        # SimpleHTTPRequestHandler would otherwise answer HEAD for the repo directory.
+        self.send_response(404)
         self.end_headers()
 
     def _who(self):
@@ -952,10 +1035,15 @@ class Handler(SimpleHTTPRequestHandler):
     SOURCE = Path(__file__).resolve()
 
     def do_GET(self):
+        if not self._origin_ok():
+            return self._send_json(403, {"error": "only the Focus Agent extension may call this bridge"})
         if self.path == "/voice/local":
             # The student's own style guide + sample essays on this machine
             # (~/.claude/skills/essay). Read-only; nothing is uploaded anywhere.
-            # Loopback only: a hosted bridge must never serve its owner's files.
+            # Developer's own loopback bridge only: a hosted bridge (even one
+            # behind a same-host reverse proxy) does not have this endpoint.
+            if HOSTED:
+                return self._send_json(404, {"error": "unknown endpoint"})
             if not self._is_loopback():
                 return self._send_json(403, {"error": "voice import only works with a bridge on this computer"})
             base = Path.home() / ".claude" / "skills" / "essay"
@@ -975,9 +1063,11 @@ class Handler(SimpleHTTPRequestHandler):
                 mtime = self.SOURCE.stat().st_mtime
             except OSError:
                 mtime = 0
+            who = self._who()
             return self._send_json(200, {
                 "ok": True, "brain": "claude", "engine": ENGINE,
-                "hosted": HOSTED, "auth": bool(TOKENS), "who": self._who(),
+                "hosted": HOSTED, "auth": bool(TOKENS), "who": who,
+                "role": _role(who),   # the panel hides developer controls unless this says dev
                 "model": API_MODEL if ENGINE == "api" else MODEL,
                 "started": int(self.STARTED), "sourceMtime": int(mtime),
                 "stale": mtime > self.STARTED,   # file edited since launch → restart me
@@ -988,22 +1078,35 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path != "/coach":
             return self._send_json(404, {"error": "unknown endpoint"})
+        if not self._origin_ok():
+            return self._send_json(403, {"error": "only the Focus Agent extension may call this bridge"})
         who = self._who()
         if who is None:
             return self._send_json(401, {"error": "access code missing or wrong (⚙ → coach server)"})
+        role = _role(who)
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            return self._send_json(400, {"error": "bad request"})
+        if length > MAX_BODY:
+            return self._send_json(413, {"error": "that's too big to send the coach -- try a smaller screenshot or fewer files"})
         if not _count_call(who):
             return self._send_json(429, {"error": f"daily limit reached ({DAILY_CAP} coach calls) — resets at midnight UTC"})
         t0 = time.time()
         method = "?"
         try:
-            length = int(self.headers.get("Content-Length", 0))
             req = json.loads(self.rfile.read(length))
             method = req.get("method")
             builder = BUILDERS.get(method)
             if not builder:
                 return self._send_json(400, {"error": f"unknown method: {method}"})
-
-            payload = req.get("payload", {})
+            # The student/developer boundary, before any prompt exists:
+            # writing methods are developer-only, and every other method runs
+            # with the client's devMode/mode flags forced to tutor for students.
+            if method in DEV_ONLY_METHODS and role != "dev":
+                print(f"[coach] {who} {method} refused (role {role})", flush=True)
+                return self._send_json(403, {"error": "that's a developer-only action -- the coach explains and checks your work, it doesn't write it"})
+            payload = _normalize_for_role(dict(req.get("payload", {}) or {}), role)
             # An image (photo of paper work, screenshot of the page) rides along
             # as a data URL; it goes to the model as a real image, never to disk
             # except for the claude -p engine's temp file.
@@ -1018,6 +1121,22 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._send_json(400, {"error": f"{method} needs imageDataUrl"})
             prompt, required = builder(payload)
             system = _system(payload)
+            if ENGINE == "mock":
+                # Test engine: report what would have gone to the model, count it, send nothing.
+                if MOCK_COUNT_FILE:
+                    with _usage_lock:
+                        n = int(MOCK_COUNT_FILE.read_text() or 0) + 1 if MOCK_COUNT_FILE.exists() else 1
+                        MOCK_COUNT_FILE.write_text(str(n))
+                return self._send_json(200, {"ok": True, "result": {
+                    "mock": True, "method": method, "role": role,
+                    "policy": "dev" if payload.get("devMode") else str(payload.get("mode") or "tutor"),
+                    "devMode": bool(payload.get("devMode")), "mode": payload.get("mode"),
+                    "system_is_dev": "DEVELOPER MODE" in system,
+                    "prompt_offers_docops": "```docops" in prompt,
+                    "prompt_asks_key_ideas": '"keyIdeas"' in prompt,   # the overview reply schema; the student prompt never asks for it
+                    "prompt_has_voice": "VOICE RULE" in prompt or "OWN VOICE" in prompt,
+                    "image": bool(image), "required": required,
+                }})
             if method == "chat":
                 reply = ask_claude_text(prompt, system, image)
                 print(f"[coach] {who} chat {ENGINE} {int((time.time() - t0) * 1000)}ms ok", flush=True)
@@ -1028,9 +1147,13 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._send_json(502, {"error": f"reply missing keys: {missing}"})
             print(f"[coach] {who} {method} {ENGINE} {int((time.time() - t0) * 1000)}ms ok", flush=True)
             return self._send_json(200, {"ok": True, "result": result})
-        except Exception as e:  # noqa: BLE001 -- report anything to the client
-            print(f"[coach] {who} {method} {ENGINE} {int((time.time() - t0) * 1000)}ms ERR {str(e)[:120]}", flush=True)
-            return self._send_json(500, {"error": str(e)[:300]})
+        except Exception as e:  # noqa: BLE001 -- report anything to the client, safely
+            # Logs and the client get the error CLASS, never the raw text: SDK
+            # and JSON errors can quote the request, i.e. the student's work.
+            kind = type(e).__name__
+            msg = str(e)[:300] if isinstance(e, RuntimeError) else f"the coach hit an error ({kind}) -- try again"
+            print(f"[coach] {who} {method} {ENGINE} {int((time.time() - t0) * 1000)}ms ERR {kind}", flush=True)
+            return self._send_json(500, {"error": msg})
 
     def log_message(self, fmt, *args):
         # Quieter logs: only /coach traffic.
@@ -1041,14 +1164,15 @@ class Handler(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     if len(sys.argv) >= 3 and sys.argv[1] == "token":
         name = sys.argv[2]
-        tok = mint_token(name)
-        print(f"access code for {name}: {tok}")
+        dev = len(sys.argv) >= 4 and sys.argv[3] == "dev"
+        tok = mint_token(name, dev)
+        print(f"access code for {name}{' (developer role)' if dev else ''}: {tok}")
         print(f"(saved to {TOKENS_FILE}; restart the bridge to load it. Hosted on Fly? add it to FA_TOKENS instead.)")
         sys.exit(0)
     if HOSTED and not TOKENS:
         sys.exit("Refusing to start: FA_HOST is not loopback but no access codes are configured (FA_TOKENS or ~/.focus-agent/tokens).")
-    if HOSTED and ENGINE != "api":
-        print("WARNING: hosted without an API key -- claude -p has no login on a server; set ANTHROPIC_API_KEY.", flush=True)
+    if HOSTED and ENGINE not in ("api", "mock"):
+        sys.exit("Refusing to start hosted without the API engine: claude -p has no login on a server and would give the model a file-reading tool. Set ANTHROPIC_API_KEY or put the key in ~/.focus-agent/api_key.")
     print(f"Focus Agent bridge on http://{HOST}:{PORT}  (auth: {len(TOKENS)} access code(s), cap {DAILY_CAP}/day each)" if TOKENS
           else f"Focus Agent bridge on http://{HOST}:{PORT}  (open: local use only)", flush=True)
     if ENGINE == "api":
