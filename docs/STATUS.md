@@ -1,6 +1,17 @@
 # STATUS — rewritten by Claude Code at the end of every session
 
-**Updated:** 2026-09-13 · **Version:** 0.8.16 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+**Updated:** 2026-09-14 · **Version:** 0.8.17 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+
+## This session (2026-09-14): missing/overdue finally shown + pinned, Smart Start opens the assignment's links, 📷 photo of my page (v0.8.17)
+
+| Ask | Root cause | Fix | Regression |
+|---|---|---|---|
+| Missing assignments never appear, never prioritized | `adapters/blackbaud.js` treated `assignment_status` 2 as "completed" (the header comment said so). Live feed 2026-09-14: status 2 = **overdue** (19 of 76 items), `missing_ind` sits on status 1/2/4. `isFinished` dropped all of them; the 14-day lookback hid the rest | `isFinished` = status 1 or 4 AND not missing; 60-day lookback; `a.overdue`; `urgencyScore` +2000 for teacher-flagged missing; `FA.isBehind`; the list pins a red **⚠️ N missing / overdue** section at the top with MISSING / OVERDUE badges and "was due …"; the hero pick never skips missing work (a brain pick that does is ignored); the pick prompt is told the rule | `smoke-panel.js`: section pinned, MISSING first, OVERDUE badged, hero = the missing one |
+| Smart Start doesn't open the links inside the assignment | Teacher-attached links/files are NOT in `long_description` — they come from `/api/assignment2/read/<assignment_id>/?personaId=2` (`LinkItems`, `DownloadItems`). `a.links` was empty for every assignment whose links were attached rather than typed. Second cause: a cached `setupPlan` built when links were empty was reused forever | adapter fetches attached links for pending items (4 at a time, in-memory cache), attached first; `FA.resolveOpens({allLinks:true})` opens every assignment link whatever the plan says (cap 8, was 3); cached plans carry a `linksSig` and are dropped when the links change | `smoke-panel.js`: both attached links opened |
+| Upload a photo of what I'm working on → annotation + summary | 📷 existed only as a dev chip that ticks checklist steps | student-facing **📷 photo of my page** chip + paste into the chat box + drop on the work view → same pipeline as 📸 (`analyzeImage`), bridge told `source: "photo"` (reads handwriting); `build_read_screen` now applies the annotation rule per assignment: summary + key ideas + quotes-with-why + up to 10 questions when annotating isn't graded, orientation + a one-line why when it is; dev always full | `security_tests.py` 78/78 (4 new: unknown → orientation, graded annotation → orientation, problem-set photo → summary allowed, question → answer mode) |
+
+- `npm test` → security 78/78 · panel boundary 28/28 · background 14/14 · docops 17/17. `npm run smoke` → 6 failures, **all pre-existing** (checkpoint/paper-mode/worker-ended/dev-toggle/dev-write; identical on the stashed tree) — not touched this session.
+- ⚠️ Not yet run in the real extension: needs a reload + ↻ on myPoly. Expect ~19 overdue items to appear at the top; "In-Class Work" (History) and "Problem Set 0: Scratch" are the two teacher-marked MISSING ones as of today.
 
 ## This session: Codex review R1–R4 of 7c65bbd, all four fixed
 

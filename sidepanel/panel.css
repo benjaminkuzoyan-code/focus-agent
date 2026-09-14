@@ -205,6 +205,16 @@ select {
 }
 .card:hover { transform: translateY(-1px); background: var(--glass-strong); }
 .card.overdue { box-shadow: inset 3px 0 0 var(--red), 0 0 18px rgba(251, 113, 133, 0.07); }
+/* Missing / overdue: pinned section at the top of the list, red all the way. */
+.list-section { display: flex; align-items: baseline; gap: 8px; margin: 10px 2px 6px; font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted); }
+.list-section.behind { color: var(--red); }
+.list-section .sub { text-transform: none; letter-spacing: 0; font-size: 11.5px; color: var(--muted); }
+.card.missing { box-shadow: inset 3px 0 0 var(--red), 0 0 18px rgba(251, 113, 133, 0.12); border-color: rgba(251, 113, 133, 0.35); }
+.badge-behind { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 1px 6px; border-radius: 999px; margin-right: 6px; vertical-align: 1px; color: #fff; background: var(--red); }
+.badge-behind.overdue { background: transparent; color: var(--red); border: 1px solid var(--red); }
+.snap-summary { margin-top: 6px; line-height: 1.45; }
+.snap-why { margin-top: 4px; font-size: 12px; color: var(--muted); font-style: italic; }
+.drop-hint { outline: 2px dashed var(--accent, #7c9cff); outline-offset: -4px; }
 .card.due-soon { box-shadow: inset 3px 0 0 var(--amber); }
 .card-title { font-weight: 650; margin-bottom: 3px; }
 .card-meta { font-size: 12px; color: var(--muted); line-height: 1.45; }

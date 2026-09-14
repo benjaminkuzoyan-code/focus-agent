@@ -326,6 +326,8 @@ def build_pick(p):
         f"Assignments (ranked by urgency, with the student's personal time estimates):\n"
         f"{json.dumps(p.get('assignments', []))}\n\n"
         f"the student's recent stats: {json.dumps(p.get('stats', {}))}\n\n"
+        "Rule: anything marked missing (a zero in the gradebook right now) or overdue comes before everything else -- "
+        "pick the missing one with the biggest grade impact first; only when nothing is missing or overdue weigh the rest.\n"
         'Choose the ONE assignment the student should start right now. Reply JSON: '
         '{"id": "<assignment id>", "reason": "<≤25 words, concrete and motivating, '
         'reference real numbers (time estimates, deadlines) when they help>"}'
@@ -461,47 +463,87 @@ def build_read_photo(p):
     ), ["legible", "stepsDone", "feedback"]
 
 
+ANNOTATION_WORDS = re.compile(
+    r"\b(annotat\w*|mark[- ]?up|marginalia|reading (notes|log|journal|response)|dialectical journal|"
+    r"double[- ]entry|close[- ]read\w*|highlight\w*|active reading|take notes|notes on (the )?(reading|chapter|text|article|video))\b",
+    re.I,
+)
+
+
+def _annotation_graded(assignment) -> bool:
+    """The annotation rule (spec section 10): are the annotations / notes / a
+    summary of this reading THE graded deliverable? Decided from the
+    assignment's own words. No title and no instructions = we don't know ->
+    treat it as graded (the conservative side: orientation only)."""
+    a = assignment if isinstance(assignment, dict) else {}
+    text = " ".join(str(a.get(k) or "") for k in ("title", "description", "type"))
+    if not text.strip():
+        return True
+    return bool(ANNOTATION_WORDS.search(text))
+
+
 def build_read_screen(p):
-    """A screenshot of what the student has on screen (Google Doc, a Drive
-    preview, an image, a textbook page -- anything the text highlighter can't
-    reach). Two modes: no question -> a page overview a tutor would give;
-    a question -> answer it about what's visible. Both also transcribe the
-    visible text so the rest of the coach (summaries, quizzes, practice
-    tests) can use the page afterwards."""
+    """An image of what the student is looking at: a screenshot (source
+    "screen": Google Doc, Drive preview, textbook page -- anything the text
+    highlighter can't reach) or a photo they uploaded (source "photo": a book
+    page, a worksheet, their own handwritten notes). Modes: a question ->
+    answer it about what's visible; otherwise the annotation rule decides:
+    annotating/summarizing IS the graded work -> orientation only (what it is,
+    what to look for, questions), and the coach says why; it isn't -> a real
+    reading companion: summary, key ideas, quotes worth marking, as many
+    questions as the page deserves. Developers always get the full version.
+    Every mode also transcribes the visible text so the rest of the coach
+    (summaries, quizzes, practice tests) can use the page afterwards."""
     page = p.get("page") or {}
     question = str(p.get("question") or "").strip()
+    source = "photo" if p.get("source") == "photo" else "screen"
+    if source == "photo":
+        what_it_is = (
+            "The image with this message is a PHOTO the student took of what they're working on: a textbook or "
+            "book page, a worksheet, a handout, or their own handwritten notes"
+            f" (file: {json.dumps(page.get('title', ''))})."
+        )
+    else:
+        what_it_is = (
+            "The image with this message is a screenshot of what the student has on screen right now"
+            f" (page title: {json.dumps(page.get('title', ''))}, site: {json.dumps(page.get('host', ''))})."
+        )
     head = (
-        "The image with this message is a screenshot of what the student has on screen right now"
-        f" (page title: {json.dumps(page.get('title', ''))}, site: {json.dumps(page.get('host', ''))}).\n"
+        what_it_is + "\n"
         f"Assignment they're working on: {json.dumps(p.get('assignment', {}))}\n\n"
         "Transcribe the main visible text faithfully (skip menus, sidebars, chrome; <= 1500 chars; "
-        "if it's a diagram or image, describe it in one or two sentences instead).\n"
+        "handwriting too, as best you can; if it's a diagram or image, describe it in one or two sentences instead).\n"
     )
     if question:
         return head + (
-            f"The student asks about this screen: {json.dumps(question)}\n"
+            f"The student asks about this {source}: {json.dumps(question)}\n"
             "Answer it the way the help policy says (tutor mode: explain and guide, don't do graded work for them). "
             'Reply JSON: {"answer": "<<= 120 words>", "text": "<transcription>"}'
         ), ["answer"]
-    if p.get("_role") != "dev":
-        # Students get ORIENTATION, never the annotation itself: for an
-        # annotation assignment, "key ideas" and "quotes worth highlighting"
-        # would be the assessed work. The coach reacts to their reading; it
-        # doesn't do it for them.
+    graded = _annotation_graded(p.get("assignment"))
+    if p.get("_role") != "dev" and graded:
+        # Students get ORIENTATION, never the annotation itself: when the
+        # assignment IS the annotation, "key ideas", a summary and "quotes
+        # worth highlighting" would be the assessed work. The coach reacts to
+        # their reading; it doesn't do it for them. It says so in one line.
         return head + (
+            "This assignment's graded work IS the annotating / note-taking / summarizing of this reading, so do NOT do it for them. "
             "Orient the student before they read closely, WITHOUT doing the reading for them: "
-            "what this is (one line), what to look for as they read (2-3 short pointers: the kind of "
+            "what this is (one line), one plain line saying why you're not summarizing it (their annotations are the graded work), "
+            "what to look for as they read (2-4 short pointers: the kind of "
             "thing a teacher wants noticed here -- claims, evidence, turns, vocabulary -- not the content itself), "
-            "and 2-3 questions they should be able to answer after reading (questions only, no answers). "
+            "and the questions they should be able to answer after reading (questions only, no answers; as many as the page deserves, up to 8). "
             "Do NOT list key ideas, do NOT pick quotes, do NOT summarize the argument. "
-            'Reply JSON: {"what": "<one line>", "lookFor": ["..."], "questions": ["..."], "text": "<transcription>"}'
+            'Reply JSON: {"what": "<one line>", "why": "<one line>", "lookFor": ["..."], "questions": ["..."], "text": "<transcription>"}'
         ), ["what"]
     return head + (
-        "Give a page overview a good tutor gives before the student reads closely: "
-        "what this is (one line), the 3-5 key ideas in plain 9th-grade words, "
-        "2-3 questions the student should be able to answer after reading it (questions only, no answers), "
-        "and up to 4 short exact quotes from the page worth highlighting. "
-        'Reply JSON: {"what": "<one line>", "keyIdeas": ["..."], "questions": ["..."], "quotes": ["..."], "text": "<transcription>"}'
+        "Be the reading companion a good tutor is when the annotations are NOT what's graded: "
+        "what this is (one line), a summary in 2-4 plain sentences (9th-grade words, the argument or the point, not a list), "
+        "the 3-6 key ideas, "
+        "as many questions as the page deserves that the student should be able to answer after reading it (questions only, no answers; up to 10), "
+        "and up to 5 short exact quotes from the page worth marking, each with 3-8 words on why. "
+        "If the page is the student's own handwritten work, the summary says what their notes cover and the key ideas point at what's missing or unclear. "
+        'Reply JSON: {"what": "<one line>", "summary": "<2-4 sentences>", "keyIdeas": ["..."], "questions": ["..."], "quotes": ["<quote> — <why>"], "text": "<transcription>"}'
     ), ["what", "keyIdeas"]
 
 

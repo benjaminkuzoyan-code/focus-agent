@@ -187,7 +187,19 @@ def main() -> int:
 
         s, j, _ = b.coach("readScreen", {"imageDataUrl": IMG, "page": {"title": "Ch 3"}, "assignment": {}}, token=STU)
         r = j.get("result", {})
-        check("student readScreen -> orientation only (no key ideas)", s == 200 and r.get("prompt_asks_key_ideas") is False and r.get("image"), f"{s} {r}")
+        check("student readScreen, unknown assignment -> orientation only (no key ideas)", s == 200 and r.get("prompt_asks_key_ideas") is False and r.get("image"), f"{s} {r}")
+        # The annotation rule (spec s10): annotating IS the graded work -> no summary / key ideas / quotes for students...
+        s, j, _ = b.coach("readScreen", {"imageDataUrl": IMG, "page": {"title": "Ch 3"}, "assignment": {"title": "Annotate chapter 3", "description": "Mark up the reading; annotations are graded."}}, token=STU)
+        r = j.get("result", {})
+        check("student readScreen, graded annotation -> orientation only", s == 200 and r.get("prompt_asks_key_ideas") is False, f"{s} {r}")
+        # ...and when it isn't, summarizing and key ideas are fine (a photo of a textbook page for a problem set).
+        s, j, _ = b.coach("readScreen", {"imageDataUrl": IMG, "page": {"title": "IMG_2041.jpg"}, "source": "photo", "assignment": {"title": "Problem Set 4", "description": "Do problems 1-12 on page 88."}}, token=STU)
+        r = j.get("result", {})
+        check("student photo, annotation not graded -> summary + key ideas allowed", s == 200 and r.get("prompt_asks_key_ideas") is True and r.get("image"), f"{s} {r}")
+        # A question about the image is answered under the tutor policy either way (never the overview schema).
+        s, j, _ = b.coach("readScreen", {"imageDataUrl": IMG, "page": {}, "question": "what does this word mean?", "assignment": {"title": "Annotate chapter 3"}}, token=STU)
+        r = j.get("result", {})
+        check("student readScreen with a question -> answer mode, no key ideas", s == 200 and r.get("prompt_asks_key_ideas") is False and "answer" in (r.get("required") or []), f"{s} {r}")
 
         for m, payload in (("precheck", {"draft": "my essay draft", "assignment": {}}),
                            ("practiceTest", {"assignment": {}, "files": []}),

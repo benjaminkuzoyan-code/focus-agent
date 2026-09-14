@@ -2,7 +2,7 @@
 
 **This file is the source of truth for what Focus Agent is supposed to do.** Code is built to match it; tests prove the match; every other description (store listing, privacy policy, landing page, parent note) is derived from it. To change the product, change the section here first, then the code, then the test.
 
-Generated from the code at v0.8.16 (2026-09-13); **reviewed by Ben by voice 2026-09-13** — his direction is folded in below and marked 🎯 (decided) or 💬 (to discuss). Each section says what the student does, what happens, what must never happen, and what proves it. Status marks: ✅ proven by an automated test · 👁 checked by hand in the browser harness · ⚠️ implemented but never run for real · ❌ not built.
+Generated from the code at v0.8.16 (2026-09-13), updated for v0.8.17 (2026-09-14: missing/overdue fix, attached links, photo); **reviewed by Ben by voice 2026-09-13** — his direction is folded in below and marked 🎯 (decided) or 💬 (to discuss). Each section says what the student does, what happens, what must never happen, and what proves it. Status marks: ✅ proven by an automated test · 👁 checked by hand in the browser harness · ⚠️ implemented but never run for real · ❌ not built.
 
 Ben reviews this and marks what's wrong or not what he wants. Claude and Codex work from the reviewed version.
 
@@ -23,10 +23,10 @@ Focus Agent is a Chrome side panel for a student who wants to do well and can't 
 
 **Promise.** 🎯 Everything the student can see in their portal, the coach can see too: assignments with the teacher's instructions, grades, syllabus/topics, schedule. No typing, no API key: the extension runs inside the student's own logged-in page and asks the portal what the page itself asks.
 
-**What happens.** The student opens their school's assignment page in a tab and taps ↻ (that button reads the portal in the browser; no coach call, no key). A content script calls the portal's own endpoints with the session already logged in, normalizes the result into one assignment shape (`adapters/schema.js`), caches it, and (where the portal exposes it) builds a Student Snapshot: classes, current grades, graded scores, schedule, topics, the personal calendar-feed link. Overdue work from the last 14 days is included.
+**What happens.** The student opens their school's assignment page in a tab and taps ↻ (that button reads the portal in the browser; no coach call, no key). A content script calls the portal's own endpoints with the session already logged in, normalizes the result into one assignment shape (`adapters/schema.js`), caches it, and (where the portal exposes it) builds a Student Snapshot: classes, current grades, graded scores, schedule, topics, the personal calendar-feed link. Overdue and missing work from the last 60 days is included, and for every pending assignment the teacher's ATTACHED links and files are fetched from the assignment's detail endpoint (they are not in the description text).
 
 **Per portal.**
-- Blackbaud / myPoly: full read. ✅ field mapping verified on Ben's account; 👁 overdue fix.
+- Blackbaud / myPoly: full read. ✅ field mapping verified on Ben's account. ✅ **v0.8.17:** status code 2 is OVERDUE (was mis-read as "completed", which hid every overdue and missing assignment); `missing_ind` = teacher-marked missing and overrides a "completed" tick; attached links/files come from `/api/assignment2/read/<id>/` (verified live 2026-09-14, 76 items).
 - Canvas: assignments, quizzes, instructions via the planner API; a school's own domain via "connect my school". ⚠️ never run on a real account. Grades/schedule ❌ not yet.
 - Google Classroom: assignments only today (To-do page scrape). 🎯 **Grades, materials and schedule are required** → ❌ planned: needs the Classroom API (Cloud project, Classroom scopes, the school allow-listing the app for under-18 accounts). Section 13 covers the Google side.
 - Aeries: ❌ not built. Plan: a DevTools session on a friend's Student Portal login, then an adapter on the same pattern. What that gives us: read access to everything *that student* can see (assignments, grades, schedule), from inside their logged-in page; not access to anything beyond their own account.
@@ -48,17 +48,17 @@ Focus Agent is a Chrome side panel for a student who wants to do well and can't 
 
 **Promise.** The student sees what to start, not a to-do list.
 
-**What happens.** Assignments are ranked by urgency (overdue first, then due-soon, size, points, and the student's own pace history). The coach's pick sits at the top as a "start here" card with one full-width ▶ Smart Start and the reason in one sentence; the rules pick appears instantly and the coach upgrades it in place. Below: a 7-day forecast strip, "tonight I have" time chips (all/30m/1h/1.5h/2h) that reorder the list to fit and say what doesn't fit, an "noticed something" card when an assignment has been visible for days with zero sessions, then every assignment as a card with its own ▶ and a ✓ for "already done". A running clock shows as a resume banner. 👁
+**What happens.** Assignments are ranked by urgency (teacher-marked MISSING first, then overdue, then due-soon, size, points, and the student's own pace history). 🎯 **Missing and overdue work is pinned in its own red section at the top of the list** ("⚠️ N missing / overdue — clear these first"), each card badged MISSING or OVERDUE with the date it was due; the coach's pick never looks past that section (✅ v0.8.17, smoke test). The coach's pick sits at the top as a "start here" card with one full-width ▶ Smart Start and the reason in one sentence; the rules pick appears instantly and the coach upgrades it in place. Below: a 7-day forecast strip, "tonight I have" time chips (all/30m/1h/1.5h/2h) that reorder the list to fit and say what doesn't fit, an "noticed something" card when an assignment has been visible for days with zero sessions, then every assignment as a card with its own ▶ and a ✓ for "already done". A running clock shows as a resume banner. 👁
 
 **Must never.** Bury the primary action below the fold at the panel's minimum width.
 
-**Proven by.** `lib/priority.js` ranking: ❌ no unit test (gap).
+**Proven by.** `scripts/smoke-panel.js`: missing section pinned, MISSING first, OVERDUE badged, hero = the missing one (✅). `lib/priority.js` ranking beyond that: ❌ no unit test (gap).
 
 ## 4. Smart Start
 
 **Promise.** One tap and the student is working: the right tab open, a checklist ready, the clock running, the coach already talking.
 
-**What happens.** Smart Start opens the assignment and its linked resources in tabs, parks distracting tabs in a minimized window, proposes the sitting length from the student's own history (5–25 min), starts the clock, and switches to the work view. If Google is connected and the assignment wants a document, it creates a new outline doc. The coach's first message says what it set up and the first move; it asks one clarifying question only when the instructions are missing. Starting a second assignment ends the running sitting. 👁 core flow; ⚠️ tab parking and doc creation not re-tested since v0.8.
+**What happens.** Smart Start opens the assignment and **every link the assignment itself carries** (the teacher's attached files and links first, then links in the instructions, up to 8 — always, whatever the plan says; ✅ smoke test) plus the plan's chosen resources in tabs, parks distracting tabs in a minimized window, proposes the sitting length from the student's own history (5–25 min), starts the clock, and switches to the work view. If Google is connected and the assignment wants a document, it creates a new outline doc. The coach's first message says what it set up and the first move; it asks one clarifying question only when the instructions are missing. Starting a second assignment ends the running sitting. 👁 core flow; ⚠️ tab parking and doc creation not re-tested since v0.8.
 
 🎯 **Google must actually work for friends before Wednesday's tests**: the sign-in on a school-managed account, the extension-ID/OAuth problem (section 13), and a real outline-doc creation on a second machine.
 
@@ -114,17 +114,17 @@ Focus Agent is a Chrome side panel for a student who wants to do well and can't 
 
 **Promise.** On any reading the student opens, select text and get three bubbles: 🖍 annotate (the coach pre-fills a *question* about the passage; the student writes the note), ≡ summarize, ? ask. Highlights anchor to text, survive reload, and feed the coach and practice tests. PDFs (including Drive PDFs) reopen in the extension's own viewer. Works on sites the student granted, per site, on tap.
 
-🎯 **The annotation rule (decided).** The coach knows the assignment, so it decides per assignment: if the assignment *requires* annotations (annotate this chapter, mark up this passage, reading notes are graded), then annotation help, summaries and "what to highlight" are off for that reading — doing them is the assignment. If annotations are *not* what's being graded, annotating and summarizing are fine, any time. The coach says which case applies in one line. ❌ not built: today summarize is always on and 📸 gives orientation for everyone; next brief makes both assignment-aware.
+🎯 **The annotation rule (decided).** The coach knows the assignment, so it decides per assignment: if the assignment *requires* annotations (annotate this chapter, mark up this passage, reading notes are graded), then annotation help, summaries and "what to highlight" are off for that reading — doing them is the assignment. If annotations are *not* what's being graded, annotating and summarizing are fine, any time. The coach says which case applies in one line. ✅ **built for 📸/📷 in v0.8.17** (server-side, from the assignment's own words; unknown assignment = treated as graded; `security_tests.py`). ❌ the text highlighter's ≡ summarize is still always on.
 
 **Must never.** Run on a site the student didn't grant. Fire on hover. Do a graded annotation for the student.
 
 **Status.** ⚠️ toolbar last verified in v0.8; viewer never run from a packaged build.
 
-## 11. 📸 Annotate my screen
+## 11. 📸 Annotate my screen · 📷 Photo of my page
 
-**Promise.** Anything the highlighter can't reach (Google Docs, Drive previews, images, scans): screenshot the tab, drag a region, and the coach helps the student read it.
+**Promise.** Anything the highlighter can't reach (Google Docs, Drive previews, images, scans): screenshot the tab, drag a region, and the coach helps the student read it. **Or upload a photo** of what's in front of them — a textbook page, a worksheet, their own handwritten notes — via the 📷 chip, by pasting an image into the chat box, or by dropping one on the work view (v0.8.17).
 
-**What happens.** Follows the annotation rule in section 10. When the assignment is not a graded annotation: what the page is, what to look for while reading, and 🎯 **as many questions as the page deserves** (not capped at 2–3; a dense page can get eight), plus key ideas and quotes worth highlighting. When it is a graded annotation: orientation and questions only, and the coach says why. With a question typed first, it answers about what's visible under the tutor policy. The transcribed text joins the assignment's files. Only a small thumbnail is kept. ❌ the assignment-aware switch and the question count are next-brief changes; today: students always get orientation + 2–3 questions.
+**What happens.** Follows the annotation rule in section 10. When the assignment is not a graded annotation: what the page is, what to look for while reading, and 🎯 **as many questions as the page deserves** (not capped at 2–3; a dense page can get eight), plus key ideas and quotes worth highlighting. When it is a graded annotation: orientation and questions only, and the coach says why. With a question typed first, it answers about what's visible under the tutor policy. The transcribed text joins the assignment's files. Only a small thumbnail is kept. ✅ v0.8.17: assignment-aware (section 10 rule) with a 2–4 sentence summary, key ideas, quotes with a why, and up to 10 questions when annotating isn't graded; orientation + why + up to 8 questions when it is; the photo prompt knows it's a photo and reads handwriting. ⚠️ never run against the real model yet.
 
 **Must never.** Capture anything without a tap. Author a graded annotation.
 
@@ -215,9 +215,9 @@ PRIVACY.md, PARENTS.md, STORE.md and the site are written from this section.
 
 - Aeries adapter ❌; Canvas and Classroom ⚠️ never on a real account; Classroom has no grades/materials/schedule.
 - No adapter fixtures, no ranking unit tests, no automated core-flow test beyond a jsdom boot.
-- Real-extension checks pending: chime, 45 s stop, mid-sitting reload, 📸, fresh-profile install, second-machine Google.
+- Real-extension checks pending: chime, 45 s stop, mid-sitting reload, 📸, 📷 photo (paste/drop too), the missing/overdue section on Ben's real feed (~19 overdue + 2 missing expected 2026-09-14), attached links opening on a real assignment, fresh-profile install, second-machine Google.
 - Hosted coach server: not deployed; API key pending; always-on vs auto-stop undecided.
 - Manifest `key` (stable extension ID) undecided because it changes the ID and the Google OAuth clients must follow.
-- Summarize on readings vs the annotation policy: undecided.
+- Summarize on readings vs the annotation policy: decided (§10) and built for 📸/📷; the text highlighter's ≡ summarize is still unconditional.
 - Accessibility (labels, focus rings, live regions): not done; needed before the store, not the pilot.
 - Placeholders: contact email, policy date, install link.

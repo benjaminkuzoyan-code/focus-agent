@@ -10,14 +10,18 @@
  *   /api/webapp/context                                  who am I (UserInfo.UserId, persona)
  *   /api/datadirect/SchoolYearsGet?userId=               school years; Current=true is this year
  *   /api/DataDirect/AssignmentCenterAssignments/         assignments (snake_case fields)
+ *   /api/assignment2/read/<assignment_id>/?personaId=2   one assignment's attached LinkItems + DownloadItems
  *   /api/datadirect/ParentStudentUserAcademicGroupsGet   classes/sections + cumgrade + markingperiodid
  *   /api/datadirect/GradeBookPerformanceAssignmentStudentList/   graded assignments for one section
  *   /api/datadirect/ScheduleList?viewerId&start&end      class meetings (unix seconds)
  *   /api/datadirect/sectiontopicsget/<sectionId>/        teacher-published topics (syllabus-ish)
  *   /api/iCalRSS/iCalScheduleGet?userId=                 personal iCal feed URL
  *
- * assignment_status codes seen live:
- *   -1 = to do, 1 = completed (student-marked), 2 = completed, 4 = graded
+ * assignment_status codes seen live (re-verified 2026-09-14 against 76 items):
+ *   -1 = to do, 0 = in progress, 1 = completed (student-marked), 2 = OVERDUE
+ *   (past due, not turned in), 4 = graded. missing_ind = the teacher marked
+ *   it missing (can sit on status 1, 2 or 4). Treating 2 as "completed" is
+ *   the bug that hid every overdue/missing assignment until v0.8.17.
  *
  * PascalCase fallbacks are kept on the assignment mapping in case another
  * Blackbaud tenant differs. `raw` is kept on every item for debugging.
@@ -36,11 +40,17 @@
     return data;
   }
 
-  /** True when Blackbaud considers the assignment done (completed or graded). */
+  /**
+   * True when the assignment is genuinely done: completed (1) or graded (4)
+   * AND the teacher hasn't flagged it missing. Status 2 is OVERDUE, never
+   * finished. A "completed" item the teacher marked missing still needs work.
+   */
   function isFinished(item) {
     const status = Number(item.assignment_status ?? item.AssignmentStatus ?? -1);
-    return status >= 1;
+    const missing = Boolean(item.missing_ind ?? item.MissingInd);
+    return (status === 1 || status === 4) && !missing;
   }
+  const STATUS_OVERDUE = 2;
 
   function formatDate(date) {
     return `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
@@ -88,6 +98,47 @@
       push(m[0], "");
     }
     return out.slice(0, 8);
+  }
+
+  /**
+   * The teacher's ATTACHED links and files live outside the description:
+   * Blackbaud's assignment detail endpoint returns them as LinkItems and
+   * DownloadItems. Fetched once per assignment per page load (in-memory
+   * cache), only for unfinished items, a few at a time.
+   */
+  const detailCache = new Map(); // assignment_id -> Promise<links[]>
+  function fetchAttachedLinks(assignmentId) {
+    if (!assignmentId) return Promise.resolve([]);
+    if (!detailCache.has(assignmentId)) {
+      const p = getJson(`/api/assignment2/read/${assignmentId}/?format=json&personaId=${PERSONA_STUDENT}`)
+        .then((d) => {
+          const out = [];
+          for (const l of d?.LinkItems || []) {
+            if (l?.Url) out.push({ url: l.Url, text: String(l.ShortDescription || l.UrlDisplay || "").trim().slice(0, 80), attached: true });
+          }
+          for (const f of d?.DownloadItems || []) {
+            const u = f?.DownloadUrl || f?.Url;
+            if (u) out.push({ url: new URL(u, location.origin).href, text: String(f.FriendlyFileName || f.ShortDescription || f.FileName || "").trim().slice(0, 80), attached: true, download: true });
+          }
+          return out;
+        })
+        .catch((e) => {
+          detailCache.delete(assignmentId); // let a later refresh retry
+          console.warn("[Focus Agent] attached links failed for", assignmentId, e.message);
+          return [];
+        });
+      detailCache.set(assignmentId, p);
+    }
+    return detailCache.get(assignmentId);
+  }
+
+  /** Run async jobs a few at a time (the portal is happier with 4 than 40). */
+  async function inBatches(items, limit, fn) {
+    const queue = [...items];
+    const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+      while (queue.length) await fn(queue.shift());
+    });
+    await Promise.all(workers);
   }
 
   // Cached per page load: who the student is + which school year is current.
@@ -144,11 +195,12 @@
     /* ---------------------------------------------------------------- *
      * Assignments (the original feature)
      * ---------------------------------------------------------------- */
-    async fetchAssignments({ includeFinished = false, monthsAhead = 4 } = {}) {
-      // Start two weeks back so OVERDUE work is in the list -- the whole "overdue
-      // goes first" rule was dead while dateStart was today.
+    async fetchAssignments({ includeFinished = false, monthsAhead = 4, daysBack = 60 } = {}) {
+      // Start two months back so OVERDUE and MISSING work is in the list. A
+      // missing assignment from three weeks ago is exactly the one the
+      // student needs to see; 14 days used to hide it.
       const today = new Date();
-      today.setDate(today.getDate() - 14);
+      today.setDate(today.getDate() - daysBack);
       const end = new Date();
       end.setMonth(end.getMonth() + monthsAhead);
 
@@ -167,7 +219,7 @@
         throw new Error("Blackbaud API returned unexpected shape (not an array)");
       }
 
-      return items
+      const assignments = items
         .filter((item) => includeFinished || !isFinished(item))
         .map((item) => {
           const indexId = item.assignment_index_id ?? item.AssignmentIndexId ?? item.AssignmentId;
@@ -195,9 +247,23 @@
           a.finished = isFinished(item);
           a.late = Boolean(item.late_ind);
           a.missing = Boolean(item.missing_ind);
+          const pastDue = a.dueDate ? new Date(a.dueDate) < new Date() : false;
+          a.overdue = a.status === STATUS_OVERDUE || (pastDue && !a.finished);
           a.assignedDate = FA.toISO(item.date_assigned);
+          a.hasAttachments = Boolean(item.has_link || item.has_download);
           return a;
         });
+
+      // Attached links + files (the ones Smart Start must open) come from the
+      // detail endpoint. Only for work that's still pending, 4 at a time.
+      const pending = assignments.filter((a) => !a.finished && a.hasAttachments && a.raw?.assignment_id);
+      await inBatches(pending, 4, async (a) => {
+        const attached = await fetchAttachedLinks(a.raw.assignment_id);
+        if (!attached.length) return;
+        const seen = new Set(attached.map((l) => l.url));
+        a.links = [...attached, ...(a.links || []).filter((l) => !seen.has(l.url))].slice(0, 12);
+      });
+      return assignments;
     },
 
     /* ---------------------------------------------------------------- *

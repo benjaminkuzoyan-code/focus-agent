@@ -113,10 +113,19 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   check("boots into list view", visible("list"));
   check("no boss battle markup", !html.includes("boss-list"));
 
-  // Smart Start on the first card
+  // Missing / overdue work is pinned first, in its own section, badged.
+  const behindHeader = window.document.querySelector("#today-list .list-section.behind");
+  check("missing/overdue section pinned at the top", Boolean(behindHeader) && behindHeader.textContent.includes("missing / overdue"), behindHeader?.textContent.slice(0, 50) || "(no section)");
+  const firstBadge = cards[0].querySelector(".badge-behind");
+  check("teacher-flagged MISSING item is the first card", firstBadge?.textContent === "MISSING" && cards[0].textContent.includes("Dunbar-Ortiz"), cards[0].querySelector(".card-title")?.textContent);
+  check("overdue item is badged and above everything due later", cards[1].querySelector(".badge-behind")?.textContent === "OVERDUE", cards[1].querySelector(".card-title")?.textContent);
+  check("the pick hero is the missing one", $("pick-title").textContent.includes("Dunbar-Ortiz"), $("pick-title").textContent);
+
+  // Smart Start on the first card (the missing one, with two attached links)
   cards[0].querySelector(".start").click();
   await sleep(800);
   check("Smart Start → work view", visible("work"));
+  check("Smart Start opened BOTH attached links", created.includes("https://docs.google.com/document/d/mock-worksheet/edit") && created.includes("https://en.wikipedia.org/wiki/Culture_of_Conquest"), created.join(" | "));
   check("work title set", $("work-title").textContent.length > 0, $("work-title").textContent);
   const steps = window.document.querySelectorAll("#steps .step");
   check("checklist generated", steps.length >= 3, `${steps.length} steps`);
@@ -258,7 +267,7 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   // Chat hygiene + study mode
   const cardsAll = [...window.document.querySelectorAll("#today-list .card")];
   const titles = cardsAll.map((c) => c.querySelector(".card-title").textContent);
-  const testIdx = titles.findIndex((x) => /test|quiz|exam/i.test(x));
+  const testIdx = titles.findIndex((x) => /UNIT TEST|quiz|exam/i.test(x)); // not "test corrections" (homework)
   check("fixture has a test to study for", testIdx >= 0, titles.join(" | ").slice(0, 80));
   cardsAll[testIdx >= 0 ? testIdx : 0].querySelector(".start").click();
   await sleep(600);

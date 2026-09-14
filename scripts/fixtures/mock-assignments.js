@@ -24,6 +24,15 @@
   const DATA = [
     // Overdue — urgency handling
     { title: "Unit 1 test corrections", course: "World History", type: "homework", due: inDays(-1), points: 10 },
+    // Teacher-flagged MISSING with attached links — must be pinned first, and
+    // Smart Start must open both links (v0.8.17 regression guard).
+    {
+      title: "Worksheet: Dunbar-Ortiz ch. 2", course: "World History", type: "homework", due: inDays(-5), points: 5, missing: true,
+      links: [
+        { url: "https://docs.google.com/document/d/mock-worksheet/edit", text: "Worksheet", attached: true },
+        { url: "https://en.wikipedia.org/wiki/Culture_of_Conquest", text: "Reading", attached: true },
+      ],
+    },
 
     // The crunch: three due tomorrow (Panic Button demo)
     { title: "Read chapters 3-4 and annotate", course: "English 9", type: "reading", due: inDays(1), points: 10 },
@@ -50,8 +59,8 @@
       return false; // never auto-selected from a page; chosen explicitly
     },
     async fetchAssignments() {
-      return DATA.map((d) =>
-        FA.makeAssignment({
+      return DATA.map((d) => {
+        const a = FA.makeAssignment({
           title: d.title,
           course: d.course,
           type: d.type,
@@ -61,8 +70,12 @@
           url: "https://en.wikipedia.org/wiki/" + encodeURIComponent(d.course.replace(/ /g, "_")),
           source: "mock",
           raw: d,
-        })
-      );
+        });
+        // The extra fields real adapters add (see adapters/blackbaud.js).
+        if (d.missing) a.missing = true;
+        if (d.links) a.links = d.links;
+        return a;
+      });
     },
   };
 })();

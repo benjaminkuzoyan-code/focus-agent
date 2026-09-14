@@ -314,9 +314,11 @@ function renderForecast(meta, sessions) {
 }
 
 function dueLabel(a) {
-  if (!a.dueDate) return "no due date";
+  if (!a.dueDate) return a.missing ? "MISSING" : "no due date";
   const h = FA.hoursUntil(a.dueDate);
-  if (h < 0) return "OVERDUE";
+  const wasDue = `was due ${new Date(a.dueDate).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`;
+  if (a.missing) return `MISSING · ${wasDue}`;
+  if (h < 0 || a.overdue) return `OVERDUE · ${wasDue}`;
   if (h < 24) return "due today/tomorrow";
   return `due ${new Date(a.dueDate).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`;
 }
@@ -373,16 +375,48 @@ function renderList(meta = {}) {
     return;
   }
 
-  // Instant pick from the rules, upgraded in place by the real brain.
+  // Missing / overdue work is pinned in its own section at the top. The
+  // ranking already puts it first (priority.js); the section makes it
+  // impossible to miss, and the pick never looks past it.
+  const behind = ranked.filter((a) => FA.isBehind(a));
+  const upNext = ranked.filter((a) => !FA.isBehind(a));
+
+  // Instant pick from the rules, upgraded in place by the real brain — but a
+  // brain pick that skips missing work is ignored: clearing zeros comes first.
   renderHero(new FA.MockCoach().pick(ranked), false);
   if (FA.coachBrain === "claude") {
-    Promise.resolve(FA.coach.pick(ranked)).then((p) => { if (p?.assignment) renderHero(p, true); }).catch(() => {});
+    Promise.resolve(FA.coach.pick(ranked))
+      .then((p) => {
+        if (!p?.assignment) return;
+        if (behind.length && !FA.isBehind(p.assignment)) return;
+        renderHero(p, true);
+      })
+      .catch(() => {});
+  }
+
+  const sectionHeader = (label, sub, cls) => {
+    const h = document.createElement("div");
+    h.className = "list-section" + (cls ? ` ${cls}` : "");
+    h.innerHTML = `<b></b><span class="sub"></span>`;
+    h.querySelector("b").textContent = label;
+    h.querySelector(".sub").textContent = sub;
+    list.appendChild(h);
+  };
+  if (behind.length) {
+    const nMissing = behind.filter((a) => a.missing).length;
+    sectionHeader(
+      `⚠️ ${behind.length} missing / overdue`,
+      nMissing ? `${nMissing} marked missing by a teacher — zeros until they're in. Clear these first.` : "Past due and not turned in. Clear these first.",
+      "behind"
+    );
   }
 
   for (const a of ranked) {
+    if (upNext.length && behind.length && a === upNext[0]) sectionHeader("up next", "", "");
     const h = FA.hoursUntil(a.dueDate);
+    const isBehind = FA.isBehind(a);
     const card = document.createElement("div");
-    card.className = "card" + (h < 0 ? " overdue" : h < 30 ? " due-soon" : "");
+    card.className = "card" + (a.missing ? " missing" : isBehind ? " overdue" : h < 30 ? " due-soon" : "");
     const steps = meta?.[a.id]?.steps || [];
     const done = steps.filter((s) => s.done).length;
     card.innerHTML = `
@@ -398,6 +432,12 @@ function renderList(meta = {}) {
         </div>
       </div>`;
     card.querySelector(".card-title").textContent = a.title;
+    if (isBehind) {
+      const badge = document.createElement("span");
+      badge.className = "badge-behind" + (a.missing ? "" : " overdue");
+      badge.textContent = a.missing ? "MISSING" : "OVERDUE";
+      card.querySelector(".card-title").prepend(badge);
+    }
     card.querySelector(".card-meta").textContent =
       `${a.course} · ${dueLabel(a)} · ~${a.estMin} min` + (a.points ? ` · ${a.points} pts` : "");
     card.querySelector(".start").addEventListener("click", () => smartStart(a));
@@ -495,6 +535,11 @@ async function renderResumeBanner() {
  * Smart Start: park what isn't needed, open what is, start the clock,
  * and land in the work view with the coach already talking.
  * ------------------------------------------------------------------ */
+/** What a setup plan was built from — if the links change, the plan is stale. */
+function linksSignature(resources) {
+  return (resources.links || []).map((l) => l.url).join("\n");
+}
+
 async function buildSetupResources(a) {
   return {
     links: a.links || [],
@@ -638,10 +683,17 @@ async function smartStart(assignment, minOverride) {
   const resources = await buildSetupResources(assignment);
   const meta = await FA.store.getMeta();
   const autopilot = Boolean(devAllowed() && settings.autopilot);
-  let plan = meta?.[assignment.id]?.setupPlan || new FA.MockCoach().setup(assignment, resources);
-  // What the plan SAYS to open, it opens. Autopilot opens everything relevant
-  // and always wants the doc when written work is involved.
-  plan = FA.resolveOpens(plan, resources, { aggressive: autopilot });
+  // A cached brain plan is only reused if the assignment's links haven't
+  // changed since it was made — a plan built when the links were empty must
+  // never be the reason nothing opens.
+  const sig = linksSignature(resources);
+  const cached = meta?.[assignment.id]?.setupPlan;
+  let plan = cached && cached.linksSig === sig ? cached : new FA.MockCoach().setup(assignment, resources);
+  // What the plan SAYS to open, it opens — and the assignment's OWN links
+  // (attached files, links in the instructions) always open, whatever the
+  // plan says. Autopilot opens everything relevant and always wants the doc
+  // when written work is involved.
+  plan = FA.resolveOpens(plan, resources, { aggressive: autopilot, allLinks: true });
   if (autopilot && ["essay", "project", "homework", "other", "lab"].includes(assignment.type)) plan = { ...plan, doc: Boolean(resources.googleConnected) };
 
   await permission; // resolved or denied — either way we go on
@@ -688,8 +740,8 @@ async function smartStart(assignment, minOverride) {
       .then(async (brainPlan0) => {
         let brainPlan = brainPlan0;
         if (!brainPlan.fromClaude || current?.assignment.id !== assignment.id) return;
-        brainPlan = FA.resolveOpens(brainPlan, resources, { aggressive: autopilot });
-        await FA.store.patchAssignmentMeta(assignment.id, { setupPlan: brainPlan });
+        brainPlan = FA.resolveOpens(brainPlan, resources, { aggressive: autopilot, allLinks: true });
+        await FA.store.patchAssignmentMeta(assignment.id, { setupPlan: { ...brainPlan, linksSig: sig } });
         const alreadyOpened = new Set((plan.opens || []).map((o) => `${o.kind}:${o.i}`));
         const extraOpens = (brainPlan.opens || []).filter((o) => !alreadyOpened.has(`${o.kind}:${o.i}`));
         // Autopilot: open what the brain added too, instead of offering buttons.
@@ -1584,6 +1636,9 @@ async function runChip(cmd) {
     }
     case "snap":
       return snapScreen({ question: $("work-input").value.trim() });
+    case "photo":
+      $("page-photo-input").click();
+      return;
     case "step-done": {
       if (cur) {
         cur.done = true;
@@ -1765,21 +1820,90 @@ async function snapScreen({ question = "" } = {}) {
   } catch {
     return pushCoach("Couldn't process the screenshot.");
   }
-  showWorkTyping();
   const page = { title: (tab.title || "").replace(/ - Google (Docs|Drive|Slides|Sheets)$/, ""), host: origin.replace(/^https?:\/\//, "") };
-  const r = await Promise.resolve(FA.coach.readScreen(current.assignment, full, { question, page }));
+  return analyzeImage({ full, thumb, question, page, source: "screen", fileUrl: tab.url.split("#")[0] });
+}
+
+/**
+ * The shared back half of 📸 screenshot and 📷 photo: send the image to the
+ * coach, file the transcription with the assignment, and post the reading
+ * companion (summary · key ideas · what to mark · questions) or, when the
+ * annotations are the graded work, orientation only (spec §10).
+ */
+async function analyzeImage({ full, thumb, question = "", page = {}, source = "screen", fileUrl = "" }) {
+  if (!current) return;
+  showWorkTyping();
+  const r = await Promise.resolve(FA.coach.readScreen(current.assignment, full, { question, page, source }));
   $("work-typing")?.remove();
-  if (!r.fromClaude) return pushCoach(r.error || "The coach couldn't read the screen.");
+  if (!r.fromClaude) return pushCoach(r.error || `The coach couldn't read the ${source === "photo" ? "photo" : "screen"}.`);
   if (question) $("work-input").value = "";
-  // The page's text joins the files (once per page title + snap) so the rest of the coach can use it.
+  // The page's text joins the files (once per page title + shot) so the rest of the coach can use it.
   if (r.text && r.text.length > 40) {
-    const f = { id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), kind: "snap", title: `📸 ${page.title || page.host || "screen"}`, url: tab.url.split("#")[0] + "#snap" + Date.now().toString(36), text: r.text, chars: r.text.length, addedAt: Date.now() };
+    const stamp = Date.now().toString(36);
+    const icon = source === "photo" ? "📷" : "📸";
+    const f = { id: "f" + stamp + Math.random().toString(36).slice(2, 5), kind: "snap", title: `${icon} ${page.title || page.host || source}`, url: (fileUrl || `photo://${stamp}`) + "#snap" + stamp, text: r.text, chars: r.text.length, addedAt: Date.now() };
     current.files.push(f);
     renderFiles();
     await saveFiles();
   }
   const text = question ? r.answer : r.what;
-  return pushCoach(text || "Here's what I see:", { kind: "snap", thumb, question, keyIdeas: r.keyIdeas, lookFor: r.lookFor, questions: r.questions, quotes: r.quotes });
+  return pushCoach(text || "Here's what I see:", { kind: "snap", thumb, question, source, summary: r.summary, why: r.why, keyIdeas: r.keyIdeas, lookFor: r.lookFor, questions: r.questions, quotes: r.quotes });
+}
+
+/**
+ * 📷 Photo of my page — upload (or paste / drop) a photo of what the student
+ * is working on: a textbook page, a worksheet, their own notes. Same
+ * pipeline as the screenshot, with the coach told it's a photo. Only ever
+ * user-initiated; the full image is never stored, a small thumbnail lives
+ * in the thread.
+ */
+async function pagePhoto(file, { question = "" } = {}) {
+  if (!current) return pushCoach("Open an assignment first, then send me the photo.");
+  if (!file || !/^image\//.test(file.type || "")) return pushCoach("That doesn't look like an image — try a jpg, png or heic-converted photo.");
+  let full, thumb;
+  const objUrl = URL.createObjectURL(file);
+  try {
+    ({ full, thumb } = await cropShot(objUrl, "all"));
+  } catch {
+    return pushCoach("Couldn't read that image.");
+  } finally {
+    URL.revokeObjectURL(objUrl);
+  }
+  const page = { title: (file.name || "photo").replace(/\.[a-z0-9]+$/i, ""), host: "photo" };
+  return analyzeImage({ full, thumb, question, page, source: "photo" });
+}
+
+$("page-photo-input").addEventListener("change", async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (file) await pagePhoto(file, { question: $("work-input").value.trim() });
+});
+
+// Paste an image into the work chat (⌘V from a phone photo, a screenshot in the clipboard).
+$("work-input").addEventListener("paste", async (e) => {
+  const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
+  if (!item) return;
+  e.preventDefault();
+  await pagePhoto(item.getAsFile(), { question: $("work-input").value.trim() });
+});
+
+// Drop an image anywhere on the work view.
+{
+  const view = $("view-work");
+  view.addEventListener("dragover", (e) => {
+    if ([...(e.dataTransfer?.types || [])].includes("Files")) {
+      e.preventDefault();
+      view.classList.add("drop-hint");
+    }
+  });
+  view.addEventListener("dragleave", () => view.classList.remove("drop-hint"));
+  view.addEventListener("drop", async (e) => {
+    view.classList.remove("drop-hint");
+    const file = [...(e.dataTransfer?.files || [])].find((f) => f.type.startsWith("image/"));
+    if (!file) return;
+    e.preventDefault();
+    await pagePhoto(file, { question: $("work-input").value.trim() });
+  });
 }
 
 /** Crop the capture to the dragged region (device pixels) and downscale; also make a thread thumbnail. */
@@ -1840,6 +1964,18 @@ function renderSnap(el, m) {
     q.className = "snap-sec";
     q.textContent = `you asked: ${m.question}`;
     el.insertBefore(q, el.firstChild);
+  }
+  if (m.summary) {
+    const d = document.createElement("div");
+    d.className = "snap-summary";
+    d.textContent = m.summary;
+    el.appendChild(d);
+  }
+  if (m.why) {
+    const d = document.createElement("div");
+    d.className = "snap-why";
+    d.textContent = m.why;
+    el.appendChild(d);
   }
   section("key ideas", m.keyIdeas);
   section("as you read, look for", m.lookFor);
