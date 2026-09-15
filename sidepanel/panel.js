@@ -173,6 +173,7 @@ async function loadAssignments(retried = false) {
   $("bridge-token").value = settings.bridgeToken || "";
   $("nightly-toggle").checked = Boolean(settings.nightlyPlan);
   $("autopilot-toggle").checked = Boolean(settings.autopilot);
+  $("video-frames-toggle").checked = Boolean(settings.videoFrames);
   $("auto-done-toggle").checked = Boolean(settings.autoDone);
   applyRoleUI();
 
@@ -637,16 +638,38 @@ function requestOriginsFor(assignment) {
   return chrome.permissions.request({ origins: [...origins] }).catch(() => false);
 }
 
+/** Hosts the assignment itself points at (its page, its links, its module) — never distractions. */
+function assignmentHosts(assignment) {
+  const hosts = new Set();
+  const add = (u) => {
+    try {
+      const h = new URL(u).hostname.replace(/^www\./, "");
+      if (h) hosts.add(h);
+    } catch {
+      /* skip */
+    }
+  };
+  add(assignment.url);
+  for (const l of assignment.links || []) add(l.url);
+  for (const t of snapshot?.topics?.[assignment.sectionId] || []) add(t.url);
+  return [...hosts];
+}
+
 async function smartStart(assignment, minOverride) {
   // 0. Permission for this assignment's sites (inside the click gesture).
   const permission = requestOriginsFor(assignment);
 
   // 1. Park distracting tabs into a separate minimized window (reversible).
+  //    A site the assignment links to (the "notes on video" YouTube tab) is
+  //    the work, not a distraction — it stays.
+  const keep = assignmentHosts(assignment);
   try {
     const allTabs = await chrome.tabs.query({ currentWindow: true });
     const distractors = allTabs.filter((t) => {
       try {
-        return DISTRACTOR_PATTERNS.some((p) => p.test(new URL(t.url).hostname)) && !t.active;
+        const host = new URL(t.url).hostname.replace(/^www\./, "");
+        if (keep.some((h) => host === h || host.endsWith("." + h))) return false;
+        return DISTRACTOR_PATTERNS.some((p) => p.test(host)) && !t.active;
       } catch {
         return false;
       }
@@ -677,6 +700,8 @@ async function smartStart(assignment, minOverride) {
   if (!active || active.assignmentId !== assignment.id) {
     await startSession(assignment, minOverride);
   }
+  // The worker's drift nudge skips these hosts for this sitting.
+  await FA.store.updateActiveSession({ allowedHosts: keep }).catch(() => {});
   await enterWork(assignment);
 
   // 3. Smart Setup: read the instructions, open what they call for.
@@ -721,6 +746,11 @@ async function smartStart(assignment, minOverride) {
   // 4. The coach speaks first: the setup summary, then a question if it
   //    isn't sure what the assignment wants.
   await pushCoach(setupMessage(plan, opened), { kind: "setup" });
+  // 4a. A video in the mix → offer the summary / key moments (spec §12.1).
+  const videoTargets = [assignment.url, ...(plan.opens || []).map((o) => (o.kind === "link" ? resources.links[o.i] : resources.topics[o.i])?.url)].filter((u) => u && isVideoTab({ url: u }));
+  if (videoTargets.length) {
+    await pushCoach("🎬 That's a video. When it's open, I can pull the captions and give you the key moments to jump to.", { kind: "nudge", actions: [{ label: "🎬 summarize the video", cmd: "video" }] });
+  }
   if (!settings.hintedHighlight) {
     await FA.store.setSettings({ hintedHighlight: true });
     settings.hintedHighlight = true;
@@ -1054,14 +1084,22 @@ function renderFiles() {
   for (const f of current.files) {
     const chip = document.createElement("span");
     chip.className = "file-chip" + (f.loading ? " loading" : "") + (f.error ? " error" : "");
-    const icon = f.kind === "gdoc" ? "📄" : f.kind === "pdf" ? "📕" : f.kind === "local" ? "📎" : f.kind === "snap" ? "📸" : "🌐";
+    const icon = f.kind === "gdoc" ? "📄" : f.kind === "pdf" ? "📕" : f.kind === "local" ? "📎" : f.kind === "snap" ? "📸" : f.kind === "video" ? "🎬" : "🌐";
     chip.innerHTML = `<span>${icon}</span><span class="f-title"></span><span class="f-size"></span><button class="f-x" title="detach">✕</button>`;
     chip.querySelector(".f-title").textContent = f.title || f.url || "file";
-    chip.querySelector(".f-size").textContent = f.loading ? "reading…" : f.error ? "!" : f.chars ? `${Math.round(f.chars / 1000)}k` : "";
-    chip.title = f.error ? `Couldn't read: ${f.error}` : f.url || f.title;
-    if (f.url && !f.url.startsWith("local:")) {
+    const size = chip.querySelector(".f-size");
+    if (f.loading && f.visionTotal) {
+      size.textContent = `👁 ${f.visionDone || 0}/${f.visionTotal}`;
+      size.classList.add("eye");
+    } else {
+      size.textContent = f.loading ? "reading…" : f.error ? "!" : f.chars ? `${Math.round(f.chars / 1000)}k${f.visionPages ? ` 👁${f.visionPages}` : ""}` : "";
+      if (f.visionPages) size.classList.add("eye");
+    }
+    chip.title = f.error ? `Couldn't read: ${f.error}` : [f.url || f.title, f.visionPages ? `${f.visionPages} image-only page(s) read by eye` : "", f.visionNote].filter(Boolean).join(" · ");
+    const openUrl = f.kind === "video" ? f.videoUrl : f.url;
+    if (openUrl && !openUrl.startsWith("local:") && !openUrl.startsWith("photo:")) {
       chip.querySelector(".f-title").style.cursor = "pointer";
-      chip.querySelector(".f-title").addEventListener("click", () => openTab(f.url, true));
+      chip.querySelector(".f-title").addEventListener("click", () => openTab(openUrl, true));
     }
     chip.querySelector(".f-x").addEventListener("click", async () => {
       current.files = current.files.filter((x) => x.id !== f.id);
@@ -1077,6 +1115,7 @@ async function loadFileText(f) {
   f.loading = true;
   f.error = null;
   renderFiles();
+  let pdfResult = null;
   try {
     let text = "";
     if (f.kind === "gdoc") {
@@ -1087,6 +1126,7 @@ async function loadFileText(f) {
       const r = await FA.pdfText.fromUrl(f.url);
       text = r.text;
       f.pages = r.pages;
+      pdfResult = r; // pages with no text layer get read by eye below
     } else if (f.kind === "page") {
       const [tab] = await chrome.tabs.query({ url: f.url.split("#")[0] + "*" });
       if (!tab?.id) throw new Error("open the page in a tab first");
@@ -1098,13 +1138,62 @@ async function loadFileText(f) {
     }
     f.text = String(text || "").slice(0, FILE_TEXT_CAP);
     f.chars = f.text.length;
-    if (!f.chars) f.error = "no text found";
+    if (pdfResult) await readWeakPages(f, pdfResult);
+    if (!f.chars) f.error = f.visionError || "no text found";
   } catch (e) {
     f.error = e.message;
   }
   f.loading = false;
   renderFiles();
   await saveFiles();
+}
+
+/* ------------------------------------------------------------------ *
+ * 👁 PDF pages the coach reads by eye (spec §11.1): every page whose text
+ * layer is (nearly) empty — a scan, a figure-only page, a worksheet — is
+ * rendered to a JPEG and sent to the coach one at a time. The
+ * transcription + figure descriptions join the file's text, so summaries,
+ * practice tests and 📸 questions can use them. Only the text is kept.
+ * ------------------------------------------------------------------ */
+const PAGE_VISION_MAX = 10;        // coach calls per PDF, tops
+const PAGE_VISION_MIN_CHARS = 150; // a text layer shorter than this = "the words aren't the point of this page"
+
+async function readWeakPages(f, r) {
+  if (!r?.pageChars?.length || !r.bytes || FA.coachBrain !== "claude" || !current) return;
+  const weak = r.pageChars.map((c, i) => ({ n: i + 1, c })).filter((p) => p.c < PAGE_VISION_MIN_CHARS).map((p) => p.n);
+  if (!weak.length) return;
+  const pages = weak.slice(0, PAGE_VISION_MAX);
+  f.visionTotal = pages.length;
+  f.visionDone = 0;
+  f.loading = true;
+  renderFiles();
+  let rendered;
+  try {
+    rendered = await FA.pdfPages.render(r.bytes, pages);
+  } catch (e) {
+    f.visionError = `couldn't render pages (${e.message})`;
+    return;
+  }
+  const extra = [];
+  for (const pg of rendered) {
+    if (!current || !current.files.includes(f)) return; // assignment changed / file detached mid-read
+    const res = await Promise.resolve(FA.coach.readPage(current.assignment, pg.dataUrl, { page: pg.page, pages: r.pages, title: f.title }));
+    if (res.fromClaude && !res.blank && (res.text || res.figures?.length)) {
+      const figs = (res.figures || []).map((x) => `[figure: ${x}]`).join("\n");
+      extra.push(`[page ${pg.page}${r.pages ? ` of ${r.pages}` : ""} — read by eye]\n${[res.text, figs].filter(Boolean).join("\n")}`);
+    } else if (res.error) {
+      f.visionError = res.error;
+    }
+    f.visionDone++;
+    renderFiles();
+  }
+  if (extra.length) {
+    f.text = [f.text, ...extra].filter(Boolean).join("\n\n").slice(0, FILE_TEXT_CAP);
+    f.chars = f.text.length;
+    f.error = null;
+  }
+  f.visionPages = extra.length;
+  f.visionNote = weak.length > pages.length ? `${weak.length - pages.length} more image-only page${weak.length - pages.length > 1 ? "s" : ""} not read (cap ${PAGE_VISION_MAX}) — send them as 📷 photos` : "";
 }
 
 /** Attach a URL (doc / pdf / page) to the current assignment, deduped. */
@@ -1161,6 +1250,8 @@ async function attachLocalFiles(fileList) {
         const r = await FA.pdfText.fromData(await file.arrayBuffer());
         f.text = r.text.slice(0, FILE_TEXT_CAP);
         f.pages = r.pages;
+        f.chars = f.text.length;
+        await readWeakPages(f, r);
       } else {
         // Blob.text() is missing in some environments; FileReader always works.
         const raw = typeof file.text === "function"
@@ -1169,14 +1260,15 @@ async function attachLocalFiles(fileList) {
         f.text = String(raw || "").slice(0, FILE_TEXT_CAP);
       }
       f.chars = f.text.length;
-      if (!f.chars) f.error = "no text found (scanned PDF? try a photo instead)";
+      if (!f.chars) f.error = f.visionError || (FA.coachBrain === "claude" ? "no text found" : "no text found (scanned PDF? the smarter coach can read it by eye; or try a photo)");
     } catch (e) {
       f.error = e.message;
     }
     f.loading = false;
     renderFiles();
     await saveFiles();
-    await pushCoach(f.error ? `Attached “${file.name}” but couldn't read it: ${f.error}` : `📎 I can see “${file.name}” now (${Math.round(f.chars / 1000)}k chars).`, { kind: "nudge" });
+    const eye = f.visionPages ? ` — ${f.visionPages} image-only page${f.visionPages > 1 ? "s" : ""} read by eye 👁` : "";
+    await pushCoach(f.error ? `Attached “${file.name}” but couldn't read it: ${f.error}` : `📎 I can see “${file.name}” now (${Math.round(f.chars / 1000)}k chars${eye}).`, { kind: "nudge" });
   }
 }
 
@@ -1362,6 +1454,7 @@ function renderThread() {
     if (m.kind === "cards" && Array.isArray(m.cards)) renderCards(el, m.cards);
     if (m.kind === "test" && m.testId) renderTest(el, m);
     if (m.kind === "snap") renderSnap(el, m);
+    if (m.kind === "video") renderVideo(el, m);
     if (m.kind === "timeup" && !m.used) {
       const c = document.createElement("span");
       c.className = "countdown";
@@ -1639,6 +1732,8 @@ async function runChip(cmd) {
     case "photo":
       $("page-photo-input").click();
       return;
+    case "video":
+      return summarizeVideo({ question: $("work-input").value.trim() });
     case "step-done": {
       if (cur) {
         cur.done = true;
@@ -1848,6 +1943,288 @@ async function analyzeImage({ full, thumb, question = "", page = {}, source = "s
   }
   const text = question ? r.answer : r.what;
   return pushCoach(text || "Here's what I see:", { kind: "snap", thumb, question, source, summary: r.summary, why: r.why, keyIdeas: r.keyIdeas, lookFor: r.lookFor, questions: r.questions, quotes: r.quotes });
+}
+
+/* ------------------------------------------------------------------ *
+ * 🎬 Summarize the video (spec §12.1). Captions are read from the open
+ * YouTube tab (no key, no download); with the frames toggle on, the video
+ * is seeked to 8 evenly spaced moments and each is screenshotted, so what
+ * was SHOWN rides along with what was SAID. The annotation rule decides on
+ * the server whether the student gets a summary or orientation.
+ * ------------------------------------------------------------------ */
+const YT_HOST = /(^|\.)youtube\.com$|(^|\.)youtu\.be$/;
+const isVideoTab = (t) => {
+  try {
+    const u = new URL(t.url || "");
+    return YT_HOST.test(u.hostname) && (/[?&]v=/.test(u.search) || /\/shorts\/|\/embed\//.test(u.pathname) || /youtu\.be$/.test(u.hostname));
+  } catch {
+    return false;
+  }
+};
+
+/** The YouTube tab to summarize: the active one, else one Smart Start opened, else any. */
+async function findVideoTab() {
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (active && isVideoTab(active)) return active;
+  const all = (await chrome.tabs.query({})).filter(isVideoTab);
+  const s = await FA.store.getActiveSession();
+  const mine = new Set(s?.tabs || []);
+  return all.find((t) => mine.has(t.id)) || all[0] || null;
+}
+
+/** Runs INSIDE the YouTube tab (page world): the caption track with timestamps + what's playing. */
+function ytCaptionsInPage() {
+  return (async () => {
+    const v = document.querySelector("video");
+    const vid = new URLSearchParams(location.search).get("v") || location.pathname.split("/").filter(Boolean).pop() || "";
+    let pr = window.ytInitialPlayerResponse || null;
+    // After in-page navigation the boot-time player response is for the OLD video; refetch the page for the current one.
+    if (!pr || (pr.videoDetails?.videoId && pr.videoDetails.videoId !== vid)) pr = null;
+    let tracks = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+    let title = pr?.videoDetails?.title || "";
+    if (!tracks.length) {
+      try {
+        const html = await (await fetch(location.href, { credentials: "include" })).text();
+        const m = html.match(/"captionTracks":(\[.*?\])/);
+        if (m) tracks = JSON.parse(m[1]);
+        const t = html.match(/"videoDetails":\{[^}]*?"title":"((?:[^"\\]|\\.)*)"/);
+        if (t && !title) title = JSON.parse(`"${t[1]}"`);
+      } catch {
+        /* fall through */
+      }
+    }
+    title = title || document.title.replace(/ - YouTube$/, "");
+    const base = { title, videoId: vid, duration: v?.duration || 0, currentTime: v?.currentTime || 0, paused: v ? v.paused : true };
+    if (!tracks.length) return { ...base, captions: [], error: "no captions on this video" };
+    const pick = tracks.find((t) => /^en/.test(t.languageCode || "") && t.kind !== "asr") || tracks.find((t) => /^en/.test(t.languageCode || "")) || tracks[0];
+    const url = pick.baseUrl + (/[?&]fmt=/.test(pick.baseUrl) ? "" : "&fmt=json3");
+    let j;
+    try {
+      j = await (await fetch(url, { credentials: "include" })).json();
+    } catch (e) {
+      return { ...base, captions: [], error: `captions weren't readable (${e.message})` };
+    }
+    const captions = [];
+    for (const ev of j.events || []) {
+      const text = (ev.segs || []).map((sg) => sg.utf8 || "").join("").replace(/\s+/g, " ").trim();
+      if (text) captions.push({ t: Math.round((ev.tStartMs || 0) / 1000), text });
+    }
+    return { ...base, captions, lang: pick.languageCode || "", auto: pick.kind === "asr" };
+  })();
+}
+
+/** Merge caption cues into ~sentence chunks and cap the total the coach gets. */
+function chunkCaptions(captions, { chunkChars = 180, maxChars = 14000 } = {}) {
+  let chunks = [];
+  let cur = null;
+  for (const c of captions) {
+    if (!cur || cur.text.length >= chunkChars || c.t - cur.end > 8) {
+      cur = { t: c.t, end: c.t, text: c.text };
+      chunks.push(cur);
+    } else {
+      cur.text += " " + c.text;
+      cur.end = c.t;
+    }
+  }
+  const total = () => chunks.reduce((n, c) => n + c.text.length, 0);
+  // Too long for one call: merge neighbours (keeps every part of the video, coarser).
+  while (chunks.length > 2 && total() > maxChars) {
+    const merged = [];
+    for (let i = 0; i < chunks.length; i += 2) {
+      const a = chunks[i], b = chunks[i + 1];
+      merged.push(b ? { t: a.t, end: b.end, text: (a.text + " " + b.text).slice(0, 700) } : a);
+    }
+    chunks = merged;
+  }
+  return chunks.map((c) => ({ t: c.t, text: c.text }));
+}
+
+/** Downscale a data URL (frames don't need to be big). */
+function shrinkDataUrl(dataUrl, maxW = 800, q = 0.6) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxW / img.width);
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(img.width * scale));
+      c.height = Math.max(1, Math.round(img.height * scale));
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL("image/jpeg", q));
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+/** Seek the video to N evenly spaced moments and screenshot each; put it back where it was. */
+async function sampleFrames(tab, info, n = 8) {
+  if (!info.duration || info.duration < 20) return [];
+  const seek = (t, play) => chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: (tt, pl) => { const v = document.querySelector("video"); if (v) { v.currentTime = tt; if (pl) v.play?.(); else v.pause?.(); } },
+    args: [t, play],
+  });
+  await chrome.tabs.update(tab.id, { active: true }); // captureVisibleTab needs it on screen
+  const frames = [];
+  try {
+    for (let i = 1; i <= n; i++) {
+      const t = Math.round((info.duration * i) / (n + 1));
+      await seek(t, false);
+      await new Promise((r) => setTimeout(r, 900));
+      try {
+        const shot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 70 });
+        frames.push({ t, dataUrl: await shrinkDataUrl(shot) });
+      } catch (e) {
+        console.warn("[Focus Agent] frame capture failed:", e.message);
+      }
+    }
+  } finally {
+    await seek(info.currentTime || 0, !info.paused).catch(() => {});
+  }
+  return frames;
+}
+
+const fmtClock = (t) => { t = Math.max(0, Math.round(t)); return t >= 3600 ? `${Math.floor(t / 3600)}:${String(Math.floor((t % 3600) / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}` : `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
+
+async function summarizeVideo({ question = "" } = {}) {
+  if (!current) return;
+  // Host permission for YouTube, inside the click (the caption fetch + screenshots need it).
+  const permission = chrome.permissions?.request ? chrome.permissions.request({ origins: ["https://www.youtube.com/*", "https://youtu.be/*"] }).catch(() => false) : Promise.resolve(false);
+  const tab = await findVideoTab();
+  if (!tab) return pushCoach("Open the YouTube video in a tab first (or Smart Start an assignment that links to one), then tap 🎬.", { kind: "nudge" });
+  await permission;
+  showWorkTyping();
+  let info;
+  try {
+    const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: "MAIN", func: ytCaptionsInPage });
+    info = res?.result;
+  } catch (e) {
+    $("work-typing")?.remove();
+    return pushCoach(`Couldn't read that YouTube tab (${e.message}). Reload it and try 🎬 again.`);
+  }
+  if (!info) {
+    $("work-typing")?.remove();
+    return pushCoach("Couldn't read that YouTube tab. Reload it and try 🎬 again.");
+  }
+  let frames = [];
+  if (settings.videoFrames) {
+    $("work-typing")?.remove();
+    await pushCoach(`👀 grabbing 8 frames from “${info.title}” — keep the tab visible for a few seconds…`, { kind: "nudge" });
+    frames = await sampleFrames(tab, info);
+    showWorkTyping();
+  }
+  if (!info.captions?.length && !frames.length) {
+    $("work-typing")?.remove();
+    return pushCoach(`I can't hear “${info.title}” — ${info.error || "no captions"}. Captions are all I can read; if the video has CC, turn it on and try again, or turn on ⚙ → “video: also look at the picture” so I can at least see it.`, { kind: "nudge" });
+  }
+  const captions = chunkCaptions(info.captions || []);
+  const r = await Promise.resolve(FA.coach.videoSummary(current.assignment, { video: info, captions, frames: frames.map((f) => f.dataUrl), question }));
+  $("work-typing")?.remove();
+  if (!r.fromClaude) return pushCoach(r.error || "The coach couldn't summarize the video.");
+  if (question) $("work-input").value = "";
+  // The captions join the files so practice tests / flashcards can use them.
+  const transcript = captions.map((c) => `[${fmtClock(c.t)}] ${c.text}`).join("\n");
+  if (transcript.length > 40 && !current.files.some((f) => f.url === `yt:${info.videoId}`)) {
+    current.files.push({ id: "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), kind: "video", title: `🎬 ${info.title}`, url: `yt:${info.videoId}`, videoUrl: tab.url.split("#")[0], text: transcript.slice(0, FILE_TEXT_CAP), chars: Math.min(transcript.length, FILE_TEXT_CAP), addedAt: Date.now() });
+    renderFiles();
+    await saveFiles();
+  }
+  const text = question ? r.answer : r.what || `About “${info.title}”:`;
+  return pushCoach(text, {
+    kind: "video", title: info.title, videoUrl: tab.url.split("#")[0], question,
+    summary: r.summary, why: r.why, listenFor: r.listenFor, keyPoints: r.keyPoints, moments: r.moments, terms: r.terms, questions: r.questions, blind: r.blind,
+    frames: frames.length, auto: Boolean(info.auto), noCaptions: !info.captions?.length,
+  });
+}
+
+/** Jump the (open) video to a moment; open it there if the tab is gone. */
+async function seekVideo(videoUrl, t) {
+  const all = (await chrome.tabs.query({})).filter(isVideoTab);
+  const tab = all.find((x) => x.url.split("#")[0] === videoUrl) || null;
+  if (tab) {
+    await chrome.tabs.update(tab.id, { active: true });
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: (tt) => { const v = document.querySelector("video"); if (v) { v.currentTime = tt; v.play?.(); } }, args: [t] });
+      return;
+    } catch { /* fall through to a fresh tab */ }
+  }
+  const u = new URL(videoUrl);
+  u.searchParams.set("t", `${Math.round(t)}s`);
+  chrome.tabs.create({ url: u.href, active: true });
+}
+
+function renderVideo(el, m) {
+  const section = (label, items, numbered = false) => {
+    if (!items?.length) return;
+    const d = document.createElement("div");
+    d.className = "snap-sec";
+    const b = document.createElement("b");
+    b.textContent = label;
+    d.appendChild(b);
+    const ul = document.createElement(numbered ? "ol" : "ul");
+    for (const it of items) {
+      const li = document.createElement("li");
+      li.textContent = it;
+      ul.appendChild(li);
+    }
+    d.appendChild(ul);
+    el.appendChild(d);
+  };
+  const momentList = (label, items) => {
+    if (!items?.length) return;
+    const d = document.createElement("div");
+    d.className = "snap-sec";
+    const b = document.createElement("b");
+    b.textContent = label;
+    d.appendChild(b);
+    const wrap = document.createElement("div");
+    wrap.className = "vid-moments";
+    for (const k of items) {
+      const btn = document.createElement("button");
+      btn.className = "vid-moment";
+      btn.title = "jump the video here";
+      btn.innerHTML = `<span class="t"></span><span class="p"></span>`;
+      btn.querySelector(".t").textContent = fmtClock(k.t);
+      btn.querySelector(".p").textContent = k.point;
+      btn.addEventListener("click", () => seekVideo(m.videoUrl, k.t));
+      wrap.appendChild(btn);
+    }
+    d.appendChild(wrap);
+    el.appendChild(d);
+  };
+  if (m.question) {
+    const q = document.createElement("div");
+    q.className = "snap-sec";
+    q.textContent = `you asked: ${m.question}`;
+    el.insertBefore(q, el.firstChild);
+  }
+  if (m.summary) {
+    const d = document.createElement("div");
+    d.className = "snap-summary";
+    d.textContent = m.summary;
+    el.appendChild(d);
+  }
+  if (m.why) {
+    const d = document.createElement("div");
+    d.className = "snap-why";
+    d.textContent = m.why;
+    el.appendChild(d);
+  }
+  momentList("key moments", m.keyPoints);
+  section("listen for", m.listenFor);
+  momentList("worth pausing at", m.moments);
+  section("terms", m.terms?.map((t) => `${t.term} — ${t.meaning}`));
+  section("be able to answer", m.questions, true);
+  if (m.blind?.length) {
+    const d = document.createElement("div");
+    d.className = "vid-blind";
+    d.textContent = `shown but not said (I can't see it${m.frames ? " well" : ""}): ${m.blind.join(" · ")}`;
+    el.appendChild(d);
+  }
+  const foot = document.createElement("div");
+  foot.className = "vid-blind";
+  foot.textContent = [m.frames ? `${m.frames} frames + captions` : m.noCaptions ? "frames only, no captions" : "captions only — what was said, not what was shown", m.auto ? "auto-captions (names/numbers may be off)" : ""].filter(Boolean).join(" · ");
+  el.appendChild(foot);
 }
 
 /**
@@ -3265,6 +3642,10 @@ $("dev-toggle").addEventListener("change", async (e) => {
   await FA.store.setSettings({ devMode: e.target.checked });
   settings.devMode = e.target.checked;
   applyRoleUI();
+});
+$("video-frames-toggle").addEventListener("change", async (e) => {
+  settings.videoFrames = e.target.checked;
+  await FA.store.setSettings({ videoFrames: e.target.checked });
 });
 $("autopilot-toggle").addEventListener("change", async (e) => {
   await FA.store.setSettings({ autopilot: e.target.checked });

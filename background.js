@@ -868,6 +868,10 @@ async function checkTabForDrift(tabId) {
     return;
   }
   if (!DISTRACTOR_PATTERNS.some((p) => p.test(host))) return;
+  // A host the assignment itself links to (the "notes on video" YouTube tab)
+  // is the work, not a drift — the panel records those on the session.
+  const bare = host.replace(/^www\./, "");
+  if ((session.allowedHosts || []).some((h) => bare === h || bare.endsWith("." + h))) return;
 
   // Rate-limit the nudges so the coach isn't a nag.
   if (Date.now() - (session.lastNudgeAt || 0) < NUDGE_COOLDOWN_MS) return;

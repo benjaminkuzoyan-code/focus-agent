@@ -1,6 +1,18 @@
 # STATUS — rewritten by Claude Code at the end of every session
 
-**Updated:** 2026-09-14 · **Version:** 0.8.17 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+**Updated:** 2026-09-15 · **Version:** 0.8.18 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+
+## This session (2026-09-15): 👁 PDF pages read by eye + 🎬 video summaries (v0.8.18) — spec §11.1, §12.1
+
+| Feature | What shipped | Regression |
+|---|---|---|
+| 👁 PDF pages the coach reads by eye | `FA.pdfText` now returns per-page text counts + the bytes; `FA.pdfPages.render` draws chosen pages to JPEG (pdf.js, 1400px). Pages with < 150 chars of text layer (scans, figures, worksheets) go to the new bridge method `readPage` one at a time (cap 10 per PDF): transcription (handwriting too) + a plain description of each figure/diagram/graph/equation, appended to the file's text as `[page N — read by eye]`. Chip shows 👁 progress and count; simple mode keeps the old text-only path. Only text is stored | `security_tests.py`: readPage needs an image; student prompt = transcription + figures, never key ideas |
+| 🎬 summarize the video | Chip in ⋯ + coach offer after Smart Start opens a YouTube link. Captions read from the open tab (page-world script: `ytInitialPlayerResponse` → caption track, `fmt=json3`; refetches the page after in-page navigation; prefers human over auto captions), merged into ≤14k chars with timestamps. New bridge method `videoSummary` applies the §10 annotation rule: "notes on video" graded → what / why / listen for / moments to pause at / questions; otherwise summary + key moments (tap → seeks the tab, or opens it at `t=`) + terms + questions + "shown but not said". **Frames toggle** (⚙, off by default): seeks the video to 8 evenly spaced moments, `captureVisibleTab` each (800px JPEG), restores position/play state, sends them as `imageDataUrls`. Transcript joins the files (`kind: "video"`) for practice tests. Smart Start no longer parks a tab whose host the assignment links to; the session carries `allowedHosts` and the worker's drift nudge skips them | `security_tests.py`: graded notes → no summary; problem-set → summary + 3 frames counted; 12 frames → 400; non-image frame → 400; question → answer mode |
+| Bridge: multiple images | `imageDataUrls` (list, ≤ 8 + 1) validated like the single image; both engines take a list (API: image blocks in order; claude-cli: numbered temp files, "look at each in order"). `IMAGE_REQUIRED_METHODS`, `MAX_IMAGES` | mock reports `images` count |
+
+- `npm test` → security **85/85** (7 new) · boundary 28/28 · background 14/14 · docops 17/17. Smoke: same 6 pre-existing failures.
+- ⚠️ Never run for real: a scanned PDF through `readPage`, a real YouTube tab (the caption endpoint is undocumented and can change; failure mode = coach says captions weren't readable), the frames pass (needs the tab visible ~8 s). Bridge restarted on Ben's Mac with the new methods (`/health` lists `readPage`, `videoSummary`).
+- Competitors for these two features (for the vault note): NotebookLM (PDF + YouTube captions), Turbolearn / Knowt / StudyFetch (lecture video → notes), Eightify / Glasp (YouTube summary extensions). None live inside the assignment.
 
 ## This session (2026-09-14): missing/overdue finally shown + pinned, Smart Start opens the assignment's links, 📷 photo of my page (v0.8.17)
 

@@ -196,6 +196,27 @@ def main() -> int:
         s, j, _ = b.coach("readScreen", {"imageDataUrl": IMG, "page": {"title": "IMG_2041.jpg"}, "source": "photo", "assignment": {"title": "Problem Set 4", "description": "Do problems 1-12 on page 88."}}, token=STU)
         r = j.get("result", {})
         check("student photo, annotation not graded -> summary + key ideas allowed", s == 200 and r.get("prompt_asks_key_ideas") is True and r.get("image"), f"{s} {r}")
+        # 👁 PDF page (spec s11.1): needs an image; the prompt is transcription + figure description, never key ideas.
+        s, j, _ = b.coach("readPage", {"assignment": {"title": "Read ch 2"}, "page": {"title": "scan.pdf", "n": 3, "of": 10}}, token=STU)
+        check("readPage without an image -> 400", s == 400, f"{s} {j}")
+        s, j, _ = b.coach("readPage", {"imageDataUrl": IMG, "assignment": {"title": "Annotate chapter 3"}, "page": {"title": "scan.pdf", "n": 3, "of": 10}}, token=STU)
+        r = j.get("result", {})
+        check("readPage -> 200 with image, no key-ideas schema", s == 200 and r.get("image") and r.get("prompt_asks_key_ideas") is False and "text" in (r.get("required") or []), f"{s} {r}")
+        # 🎬 video (spec s12.1): notes on the video ARE graded -> orientation, no summary; otherwise summary allowed; frames ride as images.
+        caps = [{"t": 0, "text": "welcome to the lecture"}, {"t": 12, "text": "today we cover conquest"}]
+        s, j, _ = b.coach("videoSummary", {"assignment": {"title": "notes on video"}, "video": {"title": "Lecture 3", "duration": 600}, "captions": caps}, token=STU)
+        r = j.get("result", {})
+        check("student videoSummary, graded notes -> orientation only (no summary)", s == 200 and r.get("prompt_asks_summary") is False, f"{s} {r}")
+        s, j, _ = b.coach("videoSummary", {"assignment": {"title": "Problem Set 4", "description": "Watch the video, then do 1-12."}, "video": {"title": "Lecture 3", "duration": 600}, "captions": caps, "imageDataUrls": [IMG, IMG, IMG]}, token=STU)
+        r = j.get("result", {})
+        check("student videoSummary, notes not graded -> summary allowed, 3 frames seen", s == 200 and r.get("prompt_asks_summary") is True and r.get("images") == 3, f"{s} {r}")
+        s, j, _ = b.coach("videoSummary", {"assignment": {"title": "Problem Set 4"}, "video": {}, "captions": caps, "imageDataUrls": [IMG] * 12}, token=STU)
+        check("videoSummary with too many frames -> 400", s == 400, f"{s} {j}")
+        s, j, _ = b.coach("videoSummary", {"assignment": {"title": "Problem Set 4"}, "video": {}, "captions": caps, "imageDataUrls": ["data:text/html;base64,PGI+"]}, token=STU)
+        check("videoSummary with a non-image frame -> 400", s == 400, f"{s} {j}")
+        s, j, _ = b.coach("videoSummary", {"assignment": {"title": "notes on video"}, "video": {}, "captions": caps, "question": "what did she say about conquest?"}, token=STU)
+        r = j.get("result", {})
+        check("videoSummary with a question -> answer mode even on graded notes", s == 200 and "answer" in (r.get("required") or []) and r.get("prompt_asks_summary") is False, f"{s} {r}")
         # A question about the image is answered under the tutor policy either way (never the overview schema).
         s, j, _ = b.coach("readScreen", {"imageDataUrl": IMG, "page": {}, "question": "what does this word mean?", "assignment": {"title": "Annotate chapter 3"}}, token=STU)
         r = j.get("result", {})

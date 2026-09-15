@@ -161,6 +161,7 @@
         <button class="chat-chip secondary" data-cmd="breakdown" title="Redo the checklist from the instructions">break it down</button>
         <button class="chat-chip secondary" data-cmd="more5">5 more minutes</button>
         <button class="chat-chip secondary" data-cmd="snap" title="Screenshot the tab you're on → drag a region → summary + what to notice, or an answer to what you typed in the box">📸 annotate my screen</button>
+        <button class="chat-chip secondary" data-cmd="video" title="Summarize the YouTube video you're on (or the one this assignment links to): captions → summary + key moments you can jump to, or an answer to what you typed in the box">🎬 summarize the video</button>
         <button class="chat-chip secondary" data-cmd="photo" title="Upload a photo of what you're working on (book page, worksheet, your notes) → summary, key ideas, what to mark, questions — or an answer to what you typed in the box. You can also paste or drop an image here.">📷 photo of my page</button>
         <button class="chat-chip secondary" data-cmd="format" title="Restyle your Google Doc (MLA: Times 12, double-spaced, 1&quot; margins). Never changes your words.">format my doc</button>
         <button class="chat-chip secondary study" data-cmd="flashcards" title="Flashcards from your files + highlights; copy them straight into Quizlet">flashcards</button>
@@ -348,6 +349,10 @@
         <div class="settings-row dev">
           <span>nightly auto-plan <span class="muted small">(4:30pm: plan tonight, write Calendar blocks)</span></span>
           <input type="checkbox" id="nightly-toggle" />
+        </label>
+        <label class="row">
+          <span>🎬 video: also look at the picture <span class="muted small">(8 frames screenshotted along the video, sent with the captions — the tab stays visible ~8 s; more coach calls)</span></span>
+          <input type="checkbox" id="video-frames-toggle" />
         </div>
         <div class="settings-row dev">
           <span>autopilot on Smart Start <span class="muted small">(open every resource, create the doc, write every step, no prompts)</span></span>

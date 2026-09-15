@@ -213,6 +213,13 @@ select {
 .badge-behind { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 1px 6px; border-radius: 999px; margin-right: 6px; vertical-align: 1px; color: #fff; background: var(--red); }
 .badge-behind.overdue { background: transparent; color: var(--red); border: 1px solid var(--red); }
 .snap-summary { margin-top: 6px; line-height: 1.45; }
+.msg.k-video { border-color: rgba(251, 191, 36, 0.45); }
+.vid-moments { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.vid-moment { display: flex; gap: 8px; align-items: flex-start; background: transparent; border: 1px solid var(--edge); border-radius: var(--r-sm); padding: 4px 8px; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.vid-moment:hover { border-color: var(--accent); }
+.vid-moment .t { color: var(--accent); font-variant-numeric: tabular-nums; flex: none; }
+.vid-blind { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.file-chip .f-size.eye { color: var(--accent2); }
 .snap-why { margin-top: 4px; font-size: 12px; color: var(--muted); font-style: italic; }
 .drop-hint { outline: 2px dashed var(--accent, #7c9cff); outline-offset: -4px; }
 .card.due-soon { box-shadow: inset 3px 0 0 var(--amber); }

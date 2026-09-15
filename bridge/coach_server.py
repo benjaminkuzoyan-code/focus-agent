@@ -149,6 +149,10 @@ def _load_tokens():
 TOKENS, DEV_NAMES = _load_tokens()
 
 
+IMAGE_REQUIRED_METHODS = ("readPhoto", "readScreen", "readPage")
+MAX_IMAGES = 9   # one page/photo/screenshot, or up to 8 video frames (+ nothing else)
+
+
 def _role(who, open_local: bool = False) -> str:
     """'dev' for the developer, 'student' for everyone else, 'none' for nobody.
 
@@ -547,6 +551,89 @@ def build_read_screen(p):
     ), ["what", "keyIdeas"]
 
 
+def build_read_page(p):
+    """One page of a PDF that has no usable text layer (a scan, a figure-only
+    page, a worksheet, handwriting). The job is the eyes, not the analysis:
+    transcribe what is there and describe each figure/diagram/graph/equation
+    plainly, so the rest of the coach can work from it. Same for students and
+    developers -- this is what OCR would do, never the assessed work."""
+    page = p.get("page") or {}
+    return (
+        "The image with this message is ONE PAGE of a PDF the student attached to this assignment"
+        f" (file: {json.dumps(page.get('title', ''))}, page {page.get('n', '?')} of {page.get('of', '?')}). "
+        "Its text layer is empty, so you are its eyes.\n"
+        f"Assignment: {json.dumps(p.get('assignment', {}))}\n\n"
+        "1) Transcribe ALL the readable text on the page faithfully, in reading order, handwriting included "
+        "(mark unreadable bits [?]); keep numbering, headings and blanks (write ____ for a blank to fill). <= 2500 chars.\n"
+        "2) For every figure, diagram, graph, table, map, photo or equation, give a plain one-or-two-sentence description "
+        "of what it shows (axes, labels, what's being compared, what the equation relates) -- describe, don't interpret or solve.\n"
+        "If the page is blank or purely decorative say so. "
+        'Reply JSON: {"text": "<transcription>", "figures": ["<description>", ...], "blank": true|false}'
+    ), ["text"]
+
+
+def _clock(t):
+    try:
+        t = int(float(t))
+    except (TypeError, ValueError):
+        return "?"
+    return f"{t // 3600}:{(t % 3600) // 60:02d}:{t % 60:02d}" if t >= 3600 else f"{t // 60}:{t % 60:02d}"
+
+
+def build_video_summary(p):
+    """A video (YouTube captions read from the student's open tab, optionally
+    with frames screenshotted along the way). The annotation rule decides:
+    notes on the video ARE the graded work -> orientation only (what it's
+    about, why, what to listen for, moments worth pausing at, questions);
+    otherwise a summary with timestamped key moments, terms, questions. A
+    question typed first is answered from the captions."""
+    video = p.get("video") or {}
+    caps = p.get("captions") or []
+    if not isinstance(caps, list):
+        caps = []
+    lines = []
+    for c in caps[:600]:
+        if isinstance(c, dict) and c.get("text"):
+            lines.append(f"[{_clock(c.get('t', 0))}] {str(c['text'])[:400]}")
+    transcript = "\n".join(lines)[:16000]
+    n_frames = int(p.get("frames") or 0)
+    head = (
+        f"Video: {json.dumps(str(video.get('title') or '')[:150])}, length {_clock(video.get('duration', 0))}"
+        f"{', auto-generated captions (names and numbers may be wrong)' if video.get('auto') else ''}.\n"
+        f"Assignment they're working on: {json.dumps(p.get('assignment', {}))}\n"
+        + (f"The {n_frames} images with this message are frames from the video, evenly spaced from start to end, in order -- "
+           "use them for what is SHOWN (whiteboard, slides, diagrams, demos) that the captions don't say.\n" if n_frames else
+           "You only have the captions: what was SAID. Anything only shown on screen is invisible to you -- say so if the assignment seems to need it.\n")
+        + f"Captions with timestamps:\n---\n{transcript or '(no captions were readable)'}\n---\n\n"
+    )
+    question = str(p.get("question") or "").strip()
+    if question:
+        return head + (
+            f"The student asks about this video: {json.dumps(question)}\n"
+            "Answer it from the captions (and frames, if any) the way the help policy says (tutor mode: explain and guide, don't do graded work for them); "
+            "cite the timestamp(s) you used. "
+            'Reply JSON: {"answer": "<<= 150 words>", "moments": [{"t": <seconds>, "point": "<why this moment>"}]}'
+        ), ["answer"]
+    if p.get("_role") != "dev" and _annotation_graded(p.get("assignment")):
+        return head + (
+            "This assignment's graded work IS taking notes on / summarizing this video, so do NOT do it for them. "
+            "Give: what the video is about in one line, one plain line saying why you're not summarizing it (their notes are the graded work), "
+            "what to listen for (2-4 pointers: the kind of thing a teacher wants noticed -- claims, steps, turns, vocabulary -- not the content), "
+            "moments worth pausing at (timestamp + a 3-6 word cue of the KIND of thing happening, never the content itself; up to 8), "
+            "and the questions they should be able to answer afterwards (questions only, no answers; up to 8). "
+            'Reply JSON: {"what": "<one line>", "why": "<one line>", "listenFor": ["..."], "moments": [{"t": <seconds>, "point": "<cue>"}], "questions": ["..."]}'
+        ), ["what"]
+    return head + (
+        "Be the study companion a good tutor is when the notes are NOT what's graded: "
+        "what the video is about in one line; a summary in 3-6 plain sentences (9th-grade words, the argument or the steps, not a list); "
+        "the key moments with timestamps (up to 10: the seconds where each idea starts, and the idea in one sentence); "
+        "terms worth knowing with a short meaning (up to 6); "
+        "and questions the student should be able to answer after watching (questions only, no answers; up to 8). "
+        "If something important is clearly shown but not said (the captions mention 'this diagram', 'as you can see'), say what you can't see. "
+        'Reply JSON: {"what": "<one line>", "summary": "<3-6 sentences>", "keyPoints": [{"t": <seconds>, "point": "..."}], "terms": [{"term": "...", "meaning": "..."}], "questions": ["..."], "blind": ["<what was shown but not said, if anything>"]}'
+    ), ["what", "summary"]
+
+
 def build_edit_doc(p):
     return (
         "DEVELOPER MODE: you have full write access to the student's Google Doc. "
@@ -886,6 +973,8 @@ BUILDERS = {
     "answerAll": build_answer_all,
     "readPhoto": build_read_photo,
     "readScreen": build_read_screen,
+    "readPage": build_read_page,
+    "videoSummary": build_video_summary,
     "editDoc": build_edit_doc,
     "flashcards": build_flashcards,
     "practiceTest": build_practice_test,
@@ -914,16 +1003,22 @@ def _api_client():
     return _client
 
 
+def _images(image):
+    """`image` may be one {"media_type","data"} dict, a list of them, or None."""
+    if not image:
+        return []
+    return list(image) if isinstance(image, (list, tuple)) else [image]
+
+
 def _complete_api(system: str, prompt: str, image=None) -> str:
     """One Claude API call. Thinking is adaptive by default on this model;
     effort is the latency knob. fallbacks='default' re-runs a classifier
     decline on another model server-side instead of surfacing a refusal.
-    `image` = {"media_type": "image/jpeg", "data": "<base64>"} goes in as a
-    real image block so the model actually sees it (a photo of paper work, a
-    screenshot of the page the student is on)."""
-    content = [{"type": "text", "text": prompt}]
-    if image:
-        content.insert(0, {"type": "image", "source": {"type": "base64", "media_type": image["media_type"], "data": image["data"]}})
+    `image` = {"media_type": "image/jpeg", "data": "<base64>"} (or a list of
+    them: video frames, in order) goes in as real image blocks so the model
+    actually sees them (a photo of paper work, a screenshot, a PDF page)."""
+    content = [{"type": "image", "source": {"type": "base64", "media_type": im["media_type"], "data": im["data"]}} for im in _images(image)]
+    content.append({"type": "text", "text": prompt})
     resp = _api_client().messages.create(
         model=API_MODEL,
         max_tokens=16000,
@@ -957,16 +1052,19 @@ def _complete_cli(system: str, prompt: str, image=None) -> str:
     keychain reads and so loses the login.)"""
     CLI_CWD.mkdir(parents=True, exist_ok=True)
     tools = ["--tools", ""]
-    img_path = None
-    if image:
+    img_paths = []
+    for i, im in enumerate(_images(image)):
         # claude -p can't take an image on stdin; drop it INSIDE the cwd and
         # let the model read it with the (read-only) Read tool -- the only tool
         # this call gets. Deleted right after.
-        ext = "png" if image["media_type"] == "image/png" else "webp" if image["media_type"] == "image/webp" else "jpg"
-        img_path = CLI_CWD / f"image-{int(time.time() * 1000)}.{ext}"
-        img_path.write_bytes(base64.b64decode(image["data"]))
+        ext = "png" if im["media_type"] == "image/png" else "webp" if im["media_type"] == "image/webp" else "jpg"
+        path = CLI_CWD / f"image-{int(time.time() * 1000)}-{i + 1}.{ext}"
+        path.write_bytes(base64.b64decode(im["data"]))
+        img_paths.append(path)
+    if img_paths:
         tools = ["--tools", "Read", "--allowedTools", "Read"]
-        prompt = f"First, look at the image at {img_path} with your Read tool. Then:\n\n{prompt}"
+        listing = "\n".join(f"  {i + 1}. {pth}" for i, pth in enumerate(img_paths))
+        prompt = (f"First, look at {'the image' if len(img_paths) == 1 else 'each of these images, in order,'} with your Read tool:\n{listing}\nThen:\n\n{prompt}")
     try:
         proc = subprocess.run(
             ["claude", "-p", "--model", MODEL, "--output-format", "json",
@@ -979,9 +1077,9 @@ def _complete_cli(system: str, prompt: str, image=None) -> str:
             cwd=str(CLI_CWD),
         )
     finally:
-        if img_path:
+        for pth in img_paths:
             try:
-                img_path.unlink()
+                pth.unlink()
             except OSError:
                 pass
     if proc.returncode != 0:
@@ -1211,8 +1309,13 @@ class Handler(SimpleHTTPRequestHandler):
             # except for the claude -p engine's temp file.
             image = None
             data_url = payload.pop("imageDataUrl", "") or ""
-            if data_url:
-                m = re.match(r"data:image/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=\s]+)$", str(data_url), re.S)
+            extra_urls = payload.pop("imageDataUrls", None)   # video frames, in order (cap MAX_IMAGES)
+            urls = ([data_url] if data_url else []) + ([str(u) for u in extra_urls] if isinstance(extra_urls, list) else [])
+            if len(urls) > MAX_IMAGES:
+                return self._send_json(400, {"error": "too many images in one call"})
+            images = []
+            for u in urls:
+                m = re.match(r"data:image/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=\s]+)$", str(u), re.S)
                 if not m:
                     return self._send_json(400, {"error": "that image couldn't be read -- try the screenshot again"})
                 b64 = re.sub(r"\s+", "", m.group(2))
@@ -1222,9 +1325,13 @@ class Handler(SimpleHTTPRequestHandler):
                     return self._send_json(400, {"error": "that image couldn't be read -- try the screenshot again"})
                 if not decoded or len(decoded) > MAX_BODY:
                     return self._send_json(400, {"error": "that image couldn't be read -- try the screenshot again"})
-                image = {"media_type": "image/" + m.group(1).replace("jpg", "jpeg"), "data": b64}
-            elif method in ("readPhoto", "readScreen"):
+                images.append({"media_type": "image/" + m.group(1).replace("jpg", "jpeg"), "data": b64})
+            if images:
+                image = images[0] if len(images) == 1 else images
+            elif method in IMAGE_REQUIRED_METHODS:
                 return self._send_json(400, {"error": f"{method} needs imageDataUrl"})
+            if method == "videoSummary":
+                payload["frames"] = len(images)
             prompt, required = builder(payload)
             system = _system(payload)
             if ENGINE == "mock":
@@ -1248,6 +1355,8 @@ class Handler(SimpleHTTPRequestHandler):
                     "system_is_dev": "DEVELOPER MODE" in system,
                     "prompt_offers_docops": "```docops" in prompt,
                     "prompt_asks_key_ideas": '"keyIdeas"' in prompt,   # the overview reply schema; the student prompt never asks for it
+                    "prompt_asks_summary": '"summary"' in prompt,      # video: the summary schema; a graded-notes video never asks for it
+                    "images": len(_images(image)),
                     "prompt_has_voice": "VOICE RULE" in prompt or "OWN VOICE" in prompt,
                     "image": bool(image), "required": required,
                 }})

@@ -2,7 +2,7 @@
 
 **This file is the source of truth for what Focus Agent is supposed to do.** Code is built to match it; tests prove the match; every other description (store listing, privacy policy, landing page, parent note) is derived from it. To change the product, change the section here first, then the code, then the test.
 
-Generated from the code at v0.8.16 (2026-09-13), updated for v0.8.17 (2026-09-14: missing/overdue fix, attached links, photo); **reviewed by Ben by voice 2026-09-13** — his direction is folded in below and marked 🎯 (decided) or 💬 (to discuss). Each section says what the student does, what happens, what must never happen, and what proves it. Status marks: ✅ proven by an automated test · 👁 checked by hand in the browser harness · ⚠️ implemented but never run for real · ❌ not built.
+Generated from the code at v0.8.16 (2026-09-13), updated for v0.8.17 (2026-09-14: missing/overdue fix, attached links, photo) and v0.8.18 (2026-09-15: PDF pages by eye, video summaries); **reviewed by Ben by voice 2026-09-13** — his direction is folded in below and marked 🎯 (decided) or 💬 (to discuss). Each section says what the student does, what happens, what must never happen, and what proves it. Status marks: ✅ proven by an automated test · 👁 checked by hand in the browser harness · ⚠️ implemented but never run for real · ❌ not built.
 
 Ben reviews this and marks what's wrong or not what he wants. Claude and Codex work from the reviewed version.
 
@@ -130,6 +130,16 @@ Focus Agent is a Chrome side panel for a student who wants to do well and can't 
 
 **Proven by.** `security_tests.py` ✅ (student vs developer prompts). ⚠️ `captureVisibleTab` and the permission prompt never run in the real extension.
 
+### 11.1 👁 PDF pages the coach reads by eye (v0.8.18)
+
+**Promise.** 🎯 A PDF with scans, diagrams, graphs, equations or handwriting is understood, not just its text layer. "No text found (scanned PDF?)" stops being an answer.
+
+**What happens.** When a PDF is attached (a teacher's Drive file, a link in the assignment, a local upload), the text layer is extracted as before. Every page with (almost) no text — under ~150 characters: a scan, a figure-only page, a worksheet — is rendered by pdf.js to a JPEG inside the extension and sent to the coach one page at a time (`readPage`). The coach transcribes what's on the page (handwriting too) and describes each figure, diagram, graph or equation in a sentence or two. That text joins the file, so summaries, practice tests, flashcards and 📸 questions can use it. The file chip shows 👁 with a page count while it reads and afterwards. Cap: 10 image-only pages per PDF (one coach call each); more are named in the chip's tooltip and can be sent as 📷 photos.
+
+**Must never.** Send pages that already have a text layer. Run without the smarter coach (simple mode keeps the old text-only path). Store the page images — only the transcription is kept.
+
+**Proven by.** `security_tests.py` (readPage needs an image; student prompt = transcription + figure description, never analysis). ⚠️ never run against the real model or a real scanned PDF.
+
 ## 12. Practice test · quiz me · flashcards · study plan
 
 **Promise.** Studying tools built from the student's own material. 🎯 Ben will revise these after the first real feedback; current behavior stands until then.
@@ -140,6 +150,18 @@ Focus Agent is a Chrome side panel for a student who wants to do well and can't 
 - Study plan: one session per day until the test, added to the checklist.
 
 **Must never.** Be the assessed work itself.
+
+### 12.1 🎬 Summarize the video (v0.8.18)
+
+**Promise.** 🎯 A video the assignment points at (or the YouTube tab the student is on) gets a summary and timestamped key moments the student can jump to, without leaving the assignment.
+
+**What happens.** Tap 🎬 (or the coach's offer after Smart Start opens a YouTube link). The extension reads the video's caption track from the open YouTube tab — no API key, no download — prefers human captions over auto-captions, and hands the coach the captions with timestamps plus the assignment. The annotation rule (section 10) applies: when taking notes on the video *is* the graded work ("notes on video"), the student gets what the video is about, why the coach won't summarize it, what to listen for, moments worth pausing at (timestamps only), and questions to be able to answer. Otherwise: a summary in plain words, key moments with timestamps (tap one → the video seeks there), terms worth knowing, questions. A question typed first is answered from the captions. Captions carry only what is *said*: a whiteboard, an equation on screen, a chart or a silent demo is invisible to them, and the coach says so. **With frames on** (⚙ → "video: also look at the picture"), the extension seeks the video to 8 evenly spaced moments, screenshots each (the tab must be visible for ~8 s), and sends the frames with the captions, so what was *shown* is described too. More coach calls, so it is a toggle, off by default. No captions (a private Drive video, VoiceThread, an upload with CC off) → the coach says it can't hear it and points at 📸 / frames.
+
+**Also.** Smart Start no longer parks a tab the assignment itself links to (YouTube was on the distractor list, so the "notes on video" tab used to get parked), and the drift nudge skips those hosts for the session.
+
+**Must never.** Download or store video or audio. Summarize a video whose notes are the graded work. Seek the student's video without the frames toggle on.
+
+**Proven by.** `security_tests.py` (student "notes on video" → orientation, no summary; problem-set video → summary allowed; frames = images validated like any image). ⚠️ never run on a real YouTube tab; caption endpoint behavior can change without notice (fallback: the coach says captions weren't readable).
 
 ## 13. Google
 
@@ -215,7 +237,7 @@ PRIVACY.md, PARENTS.md, STORE.md and the site are written from this section.
 
 - Aeries adapter ❌; Canvas and Classroom ⚠️ never on a real account; Classroom has no grades/materials/schedule.
 - No adapter fixtures, no ranking unit tests, no automated core-flow test beyond a jsdom boot.
-- Real-extension checks pending: chime, 45 s stop, mid-sitting reload, 📸, 📷 photo (paste/drop too), the missing/overdue section on Ben's real feed (~19 overdue + 2 missing expected 2026-09-14), attached links opening on a real assignment, fresh-profile install, second-machine Google.
+- Real-extension checks pending: chime, 45 s stop, mid-sitting reload, 📸, 📷 photo (paste/drop too), 👁 a real scanned PDF, 🎬 a real YouTube tab (captions + frames), the missing/overdue section on Ben's real feed (~19 overdue + 2 missing expected 2026-09-14), attached links opening on a real assignment, fresh-profile install, second-machine Google.
 - Hosted coach server: not deployed; API key pending; always-on vs auto-stop undecided.
 - Manifest `key` (stable extension ID) undecided because it changes the ID and the Google OAuth clients must follow.
 - Summarize on readings vs the annotation policy: decided (§10) and built for 📸/📷; the text highlighter's ≡ summarize is still unconditional.
