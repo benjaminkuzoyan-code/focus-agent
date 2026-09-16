@@ -1,6 +1,13 @@
 # STATUS — rewritten by Claude Code at the end of every session
 
-**Updated:** 2026-09-15 · **Version:** 0.8.19 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+**Updated:** 2026-09-15 · **Version:** 0.8.20 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+
+## Also 2026-09-15: too many "overdue" + the flashing timer (v0.8.20)
+
+| Ben's report | Cause | Fix | Regression |
+|---|---|---|---|
+| "marking way too many things as overdue" | Blackbaud status 2 = past due and never ticked complete — 20 of Ben's 76 items, most of them readings / in-class work he did but never ticked (teachers don't ask for it). v0.8.17 surfaced all of them as OVERDUE | **5-day grace window** (`FA.OVERDUE_GRACE_DAYS`, `FA.isStale`): past due ≤ 5 days = OVERDUE and on top; older = stale → out of the ranking, folded into "✓ finished this year" as "past due · never ticked complete"; teacher-marked MISSING always on top regardless of age | smoke: 3-week-old overdue fixture folded, not badged; only 2 badges (MISSING + recent OVERDUE) |
+| "the timer bugs out sometimes and starts flashing weirdly" | `restoreClock` is async (awaits storage) and callers overlap — a chunk-chip tap or +5 calls it directly AND `storage.onChanged` calls it for the same change — so two `setInterval`s ended up ticking with different session snapshots, rewriting the ring, `overtime`/`idle` classes and the "N min left" line against each other every second; the leaked one could also fire time-up twice. Separately, the "still there?" ring blink was a 1.1 s strobe, and watching a video (no mouse/keyboard for 10 min) counted as idle | generation counter on `restoreClock` (older calls stop themselves, the interval checks it each tick); idle blink slowed to a 2.6 s breathe; the worker treats any audible tab as activity; only the newest chat bubble animates on re-render | — (jsdom can't see it; Ben's next sitting) |
 
 ## Later the same day (2026-09-15): silent coach + the whole school year (v0.8.19)
 

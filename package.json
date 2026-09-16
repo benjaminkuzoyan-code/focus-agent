@@ -1,6 +1,6 @@
 {
   "name": "focus-agent",
-  "version": "0.8.19",
+  "version": "0.8.20",
   "private": true,
   "description": "Focus Agent: a Chrome side-panel coach that reads a student's school portal and helps them start homework. Tutor, never a ghostwriter.",
   "scripts": {

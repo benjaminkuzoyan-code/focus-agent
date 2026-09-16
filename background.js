@@ -546,12 +546,21 @@ function systemActive() {
   });
 }
 
+/** A tab playing sound (a lecture, a video the assignment linked) is the student working, not idle. */
+async function somethingPlaying() {
+  try {
+    return (await chrome.tabs.query({ audible: true })).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function idleWatch() {
   const session = await FA.store.getActiveSession();
   if (!session) return;
   const now = Date.now();
   const lastActiveAt = session.lastActiveAt || session.startedAt;
-  if (await systemActive()) {
+  if ((await systemActive()) || (await somethingPlaying())) {
     if (now - lastActiveAt > 30000 || session.idleAskAt) await FA.store.updateActiveSession({ lastActiveAt: now, idleAskAt: 0 });
     return;
   }

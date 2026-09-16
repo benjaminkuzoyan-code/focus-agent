@@ -48,6 +48,10 @@
     { title: "Practice quiz: organelles", course: "Biology", type: "homework", due: inDays(5), points: 10 },
     { title: "UNIT TEST: Cell Structure & Function", course: "Biology", type: "test", due: inDays(6), points: 100 },
 
+    // Past due 3 weeks, never ticked complete, teacher never marked it missing → Blackbaud says
+    // "overdue" forever; we call it stale: folded away, not ranked (v0.8.20 grace window).
+    { title: "Read Appiah, 'There is no such thing as western civilization'", course: "World History", type: "reading", due: inDays(-21), points: 10, overdue: true },
+
     // Already graded in the portal — belongs in the folded "finished this year" section, never in the ranking.
     { title: "Syllabus quiz", course: "Biology", type: "homework", due: inDays(-12), points: 5, finished: true, status: 4 },
 
@@ -78,6 +82,7 @@
         if (d.missing) a.missing = true;
         if (d.links) a.links = d.links;
         if (d.finished) { a.finished = true; a.status = d.status ?? 1; }
+        if (d.overdue) { a.overdue = true; a.status = 2; }
         return a;
       });
     },

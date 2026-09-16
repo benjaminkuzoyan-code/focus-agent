@@ -123,7 +123,8 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   check("overdue item is badged and above everything due later", cards[1].querySelector(".badge-behind")?.textContent === "OVERDUE", cards[1].querySelector(".card-title")?.textContent);
   check("the pick hero is the missing one", $("pick-title").textContent.includes("Dunbar-Ortiz"), $("pick-title").textContent);
   const fin = window.document.querySelector("#today-list .finished-section");
-  check("graded work sits folded in 'finished this year', not in the ranking", Boolean(fin) && fin.textContent.includes("(1)") && ![...cards].some((c) => c.textContent.includes("Syllabus quiz")), fin?.querySelector("summary")?.textContent);
+  check("graded + stale-overdue work sit folded at the bottom, not in the ranking", Boolean(fin) && fin.textContent.includes("(2)") && ![...cards].some((c) => c.textContent.includes("Syllabus quiz") || c.textContent.includes("Appiah")), fin?.querySelector("summary")?.textContent);
+  check("only the recent overdue item is 'behind' (3-week-old one is stale, not overdue)", [...window.document.querySelectorAll("#today-list .card .badge-behind")].length === 2, String([...window.document.querySelectorAll("#today-list .card .badge-behind")].length));
 
   // Smart Start on the first card (the missing one, with two attached links)
   cards[0].querySelector(".start").click();

@@ -462,7 +462,7 @@ function renderList(meta = {}) {
  */
 function renderFinished(list, meta = {}) {
   const done = assignments
-    .filter((a) => a.finished || meta?.[a.id]?.done)
+    .filter((a) => a.finished || meta?.[a.id]?.done || FA.isStale(a))
     .sort((a, b) => (b.dueDate || "").localeCompare(a.dueDate || ""));
   if (!done.length) return;
   const det = document.createElement("details");
@@ -475,7 +475,7 @@ function renderFinished(list, meta = {}) {
     row.className = "finished-row";
     row.innerHTML = `<span class="f-t"></span><span class="f-m"></span>`;
     row.querySelector(".f-t").textContent = a.title;
-    const status = a.missing ? "missing" : a.status === 4 ? "graded" : a.finished ? "completed" : "done here";
+    const status = a.missing ? "missing" : a.status === 4 ? "graded" : a.finished ? "completed" : meta?.[a.id]?.done ? "done here" : "past due · never ticked complete (comes back on top if the teacher marks it missing)";
     row.querySelector(".f-m").textContent = `${a.course} · ${a.dueDate ? new Date(a.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "no date"} · ${status}` + (a.points ? ` · ${a.points} pts` : "");
     if (a.url) {
       row.style.cursor = "pointer";
@@ -897,10 +897,23 @@ async function enterWork(assignment) {
 }
 
 const RING_C = 603.19; // 2π·96, the ring circle's circumference
+let clockGen = 0; // restoreClock generation: only the newest call may own the interval
 
+/**
+ * (Re)build the clock from the stored session. Callers overlap constantly
+ * (a chip tap updates the session AND storage.onChanged fires for the same
+ * change), and each call awaits storage before it creates its interval — so
+ * two calls used to leave TWO intervals ticking with different session
+ * snapshots, rewriting the ring and the "N min left" line against each
+ * other every second (the "timer flashes weirdly" bug). Now every call
+ * takes a generation number; anything older than the newest stops itself.
+ */
 async function restoreClock() {
+  const gen = ++clockGen;
   clearInterval(timerInterval);
+  timerInterval = null;
   const session = await FA.store.getActiveSession();
+  if (gen !== clockGen) return; // a newer restoreClock is already running
   const moodRow = $("mood-row");
   const ring = $("ring-fg");
   const startBtn = $("ring-start");
@@ -959,7 +972,11 @@ async function restoreClock() {
     }
   };
   tick();
-  timerInterval = setInterval(tick, 1000);
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    if (gen !== clockGen) { clearInterval(timerInterval); return; } // superseded — stop ticking
+    tick();
+  }, 1000);
 }
 
 /** Ramp chips: 5 · 10 · 15 · 20 · 25, the proposal pre-selected, tap to change. */

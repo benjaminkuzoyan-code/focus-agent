@@ -381,7 +381,7 @@ select {
   border-bottom-right-radius: 6px;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .msg { animation: msgIn 0.25s ease-out; }
+  .msg:last-child { animation: msgIn 0.25s ease-out; } /* only the newest bubble slides in; a re-render must not re-animate the whole thread */
   @keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 }
 .typing { display: inline-flex; gap: 4px; padding: 4px 2px; }
@@ -607,8 +607,9 @@ select {
 .work-ring .timer-sub { max-width: 130px; line-height: 1.3; }
 .ring-fg.idle { stroke: var(--amber); filter: drop-shadow(0 0 8px rgba(252, 211, 77, 0.6)); }
 @media (prefers-reduced-motion: no-preference) {
-  .ring-fg.idle { animation: ringBlink 1.1s ease-in-out infinite alternate; }
-  @keyframes ringBlink { from { opacity: 0.45; } to { opacity: 1; } }
+  /* "still there?" — a slow breathe, not a strobe */
+  .ring-fg.idle { animation: ringBlink 2.6s ease-in-out infinite alternate; }
+  @keyframes ringBlink { from { opacity: 0.55; } to { opacity: 1; } }
 }
 .ring-center .primary { padding: 9px 18px; font-size: 13.5px; margin-top: 4px; }
 .timer-clock.dim { opacity: 0.35; font-size: 26px; }
