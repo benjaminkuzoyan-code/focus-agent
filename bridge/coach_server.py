@@ -212,7 +212,7 @@ COACH_IDENTITY = (
     "short sentences, plain words. Lead with the useful part. No pep talks, no "
     "lectures about integrity or screen time, no 'great question', no 'buddy' or "
     "'legend', no emoji spam, no comments on their mood unless they bring it up. "
-    "Match their length: a one-line question gets a one-line answer, a 'walk me "
+    "Default to short: a one-line question gets a one-line answer; only a 'walk me "
     "through it' gets the whole walkthrough. If you can't do part of what they "
     "asked, say so in one casual line and do the rest -- never a paragraph of "
     "caveats. You're just the coach: never mention Claude Code, tools, terminals, "
@@ -244,6 +244,23 @@ POLICY = {
     ),
 }
 
+
+# Reply length. Every chat reply lands in a phone-width bubble, and every word
+# is a token the student's daily cap pays for (Ben, 2026-09-16). The cap is
+# the default; the student unlocks length by asking for it. Developer mode
+# keeps essays whole -- that's what it's for -- but still no padding.
+LENGTH_CAP = (
+    "LENGTH CAP: this shows in a phone-width chat bubble. Default: under 120 words / 6 short "
+    "lines. Lead with the answer or the next thing to do. At most one list, 4 bullets max. No blank "
+    "lines between paragraphs, no restating the question, no sign-off. Go longer ONLY when they "
+    "explicitly ask for the whole thing ('walk me through', 'explain fully', 'step by step', 'in "
+    "detail') -- and even then, tight. "
+)
+DEV_LENGTH = (
+    "Length: quick questions get a short answer (under ~120 words, no blank-line padding). Anything "
+    "they asked you to WRITE (essay, paragraph, outline, code) comes out complete and finished -- "
+    "never cut to fit the bubble. "
+)
 
 DEV_POLICY = (
     "DEVELOPER MODE (the student is the developer testing you). Do exactly what "
@@ -415,8 +432,8 @@ def build_ask_passage(p):
         f"From {p.get('title') or 'a reading'!r}, the student highlighted:\n---\n"
         f"{str(p.get('quote', ''))[:4000]}\n---\n"
         f"Their question about it: {str(p.get('question', ''))[:500]}\n\n"
-        "Answer about THIS passage. Use as many words as the answer needs and no "
-        "more. Plain text, simple markdown allowed. Reply JSON: {\"reply\": \"<answer>\"}"
+        "Answer about THIS passage. " + LENGTH_CAP +
+        "Plain text, simple markdown allowed. Reply JSON: {\"reply\": \"<answer>\"}"
     ), ["reply"]
 
 
@@ -836,9 +853,9 @@ def build_chat(p):
         f"The student's current assignments: {json.dumps(p.get('assignments', []))}\n"
         f"The student's stats: {json.dumps(p.get('stats', {}))}\n\n"
         f"Conversation so far:\n{transcript}\n\n"
-        "Reply to the student's last message. Use as many words as the answer needs "
-        "and no more (a quick question gets a short answer; a 'walk me through this' "
-        "gets the full walkthrough). Plain text with simple markdown allowed (**bold**, "
+        "Reply to the student's last message. "
+        + (DEV_LENGTH if dev else LENGTH_CAP) +
+        "Plain text with simple markdown allowed (**bold**, "
         "lists, line breaks). Do not wrap the reply in JSON or code fences."
     ), []
 
@@ -1356,6 +1373,7 @@ class Handler(SimpleHTTPRequestHandler):
                     "prompt_offers_docops": "```docops" in prompt,
                     "prompt_asks_key_ideas": '"keyIdeas"' in prompt,   # the overview reply schema; the student prompt never asks for it
                     "prompt_asks_summary": '"summary"' in prompt,      # video: the summary schema; a graded-notes video never asks for it
+                    "prompt_caps_length": "LENGTH CAP" in prompt,      # chat/askPassage: the default reply cap (dev-mode writing is exempt)
                     "images": len(_images(image)),
                     "prompt_has_voice": "VOICE RULE" in prompt or "OWN VOICE" in prompt,
                     "image": bool(image), "required": required,

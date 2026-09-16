@@ -1,6 +1,17 @@
 # STATUS — rewritten by Claude Code at the end of every session
 
-**Updated:** 2026-09-15 · **Version:** 0.8.20 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+**Updated:** 2026-09-16 · **Version:** 0.8.21 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+
+## 2026-09-16: chat replies too big (v0.8.21) — spec §7
+
+| Layer | Fix | Regression |
+|---|---|---|
+| Prompt | `LENGTH_CAP` on `build_chat` (tutor/answer) and `build_ask_passage`: < 120 words / 6 lines, lead with the answer, ≤ 1 list of 4, no padding, longer only on explicit ask. `DEV_LENGTH` for developer mode: short answers, but written work stays whole. `COACH_IDENTITY` now "default to short". Mock flag `prompt_caps_length`. No `max_tokens` (a mid-sentence cut is worse than long) | `security_tests.py` **89/89** (+4: student chat capped, student askPassage capped, dev+devMode uncapped, dev with switch off capped) |
+| Client | `ClaudeCoach.chat` backstop 6 000 chars (40 000 in devMode), cut at a word boundary + " …" | — |
+| Panel | `scrollMessages(wrap, "lastTop")`: a coach reply lands with its first line at the top of the box (`pushCoach`, `sendChat` reply); student sends / typing stay at the bottom. `fillMsg`: CRLF/trailing-space/3+-newline cleanup into `.msg-text`; coach replies > 12 lines or > 700 chars fold (`.clamp`, mask fade) with a `.msg-more` "show more ▾ / show less ▴" remembered per bubble. `.msg` `pre-line`; `.work-messages` 40vh → 50vh; dead `.more-chat` removed | smoke +4 (short not folded, long folded, padding collapsed, expands) |
+
+- Ben's framing: the cap also moderates tokens per request so a student's daily usage isn't massive — the length rule doubles as the cost rule.
+- Bridge restarted (prompt change). ⚠️ Real replies not yet seen with the cap; check the first few chats after reload (0.8.21).
 
 ## Also 2026-09-15: too many "overdue" + the flashing timer (v0.8.20)
 

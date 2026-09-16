@@ -184,6 +184,9 @@ def main() -> int:
         check("student chat never offered docops", r.get("prompt_offers_docops") is False, str(r.get("prompt_offers_docops")))
         check("student chat: no voice profile in prompt", r.get("prompt_has_voice") is False, str(r.get("prompt_has_voice")))
         check("student chat counted as one model call", b.calls() == before + 1, str(b.calls()))
+        check("student chat: prompt carries the reply LENGTH CAP", r.get("prompt_caps_length") is True, str(r))
+        s, j, _ = b.coach("askPassage", {"quote": "The mitochondria is the powerhouse of the cell.", "question": "what does that mean?", "assignment": {}}, token=STU)
+        check("student askPassage: prompt carries the LENGTH CAP", s == 200 and j.get("result", {}).get("prompt_caps_length") is True, f"{s} {j}")
 
         s, j, _ = b.coach("readScreen", {"imageDataUrl": IMG, "page": {"title": "Ch 3"}, "assignment": {}}, token=STU)
         r = j.get("result", {})
@@ -235,10 +238,12 @@ def main() -> int:
         s, j, _ = b.coach("chat", dict(STUDENT_ATTACK), token=DEV)
         r = j.get("result", {})
         check("dev chat with devMode -> developer policy + docops offered", r.get("system_is_dev") and r.get("prompt_offers_docops"), str(r))
+        check("dev chat with devMode -> no LENGTH CAP (essays come out whole)", r.get("prompt_caps_length") is False, str(r))
         s, j, _ = b.coach("readScreen", {"imageDataUrl": IMG, "page": {}, "assignment": {}}, token=DEV)
         check("dev readScreen -> full overview", j.get("result", {}).get("prompt_asks_key_ideas") is True, str(j.get("result")))
         s, j, _ = b.coach("chat", {"messages": [], "devMode": False}, token=DEV)
         check("dev with devMode off -> tutor (the switch still matters for the dev)", j.get("result", {}).get("policy") == "tutor", str(j.get("result")))
+        check("dev with devMode off -> LENGTH CAP applies", j.get("result", {}).get("prompt_caps_length") is True, str(j.get("result")))
 
         # --- bounded failures ---
         before = b.calls()

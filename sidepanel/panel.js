@@ -1493,7 +1493,53 @@ async function saveThread() {
   await FA.store.patchAssignmentMeta(current.assignment.id, { thread: current.thread });
 }
 
-function renderThread() {
+/* ------------------------------------------------------------------ *
+ * Bubble helpers (Ben, 2026-09-15: "the chat responses are way too big").
+ *  - scrollMessages: a coach reply lands with its FIRST line at the top of
+ *    the box ("lastTop"), so a long answer reads from the start; the
+ *    student's own sends keep the box at the bottom. The browser clamps
+ *    scrollTop, so a short reply still sits at the bottom as before.
+ *  - fillMsg: blank-line padding collapsed; a long coach reply (> 12 lines
+ *    or > 700 chars) folds after 12 lines with "show more ▾". Stored text is
+ *    never changed; the fold is remembered per bubble across re-renders.
+ * ------------------------------------------------------------------ */
+function scrollMessages(wrap, mode = "bottom") {
+  const last = wrap.lastElementChild;
+  if (mode === "lastTop" && last) {
+    wrap.scrollTop = last.getBoundingClientRect().top - wrap.getBoundingClientRect().top + wrap.scrollTop - 4;
+    return;
+  }
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+const expandedMsgs = new Set(); // `at` stamps the student opened
+const tidyMsg = (t) => String(t ?? "").replace(/\r\n?/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+const MSG_FOLD_LINES = 12;
+const MSG_FOLD_CHARS = 700;
+
+function fillMsg(el, m) {
+  const text = tidyMsg(m.text);
+  const body = document.createElement("div");
+  body.className = "msg-text";
+  body.textContent = text;
+  el.appendChild(body);
+  const long = m.role !== "user" && !m.kind && (text.split("\n").length > MSG_FOLD_LINES || text.length > MSG_FOLD_CHARS);
+  if (!long) return;
+  body.classList.add("clamp");
+  if (expandedMsgs.has(m.at)) body.classList.add("expanded");
+  const more = document.createElement("button");
+  more.className = "msg-more";
+  const label = () => (more.textContent = body.classList.contains("expanded") ? "show less ▴" : "show more ▾");
+  label();
+  more.addEventListener("click", () => {
+    if (body.classList.toggle("expanded")) expandedMsgs.add(m.at);
+    else expandedMsgs.delete(m.at);
+    label();
+  });
+  el.appendChild(more);
+}
+
+function renderThread(opts = {}) {
   const wrap = $("work-messages");
   wrap.innerHTML = "";
   if (!current) return;
@@ -1506,7 +1552,7 @@ function renderThread() {
   for (const m of current.thread) {
     const el = document.createElement("div");
     el.className = "msg " + (m.role === "user" ? "me" : "coach") + (m.kind ? ` k-${m.kind}` : "");
-    el.textContent = m.text;
+    fillMsg(el, m);
     if (m.kind === "cards" && Array.isArray(m.cards)) renderCards(el, m.cards);
     if (m.kind === "test" && m.testId) renderTest(el, m);
     if (m.kind === "snap") renderSnap(el, m);
@@ -1546,7 +1592,7 @@ function renderThread() {
     }
     wrap.appendChild(el);
   }
-  wrap.scrollTop = wrap.scrollHeight;
+  scrollMessages(wrap, opts.scrollTo);
 }
 
 /**
@@ -1561,7 +1607,7 @@ async function pushCoach(text, extra = {}) {
   const { auto, ...rest } = extra;
   if (auto && !settings.coachSpeaksUp) return;
   current.thread.push({ role: "coach", text, at: Date.now(), ...rest });
-  renderThread();
+  renderThread({ scrollTo: "lastTop" });
   await saveThread();
 }
 
@@ -3587,7 +3633,7 @@ async function loadChat() {
   renderChatMessages();
 }
 
-function renderChatMessages() {
+function renderChatMessages(opts = {}) {
   const wrap = $("chat-messages");
   wrap.innerHTML = "";
   if (!chatHistory.length) {
@@ -3596,10 +3642,10 @@ function renderChatMessages() {
   for (const m of chatHistory) {
     const el = document.createElement("div");
     el.className = "msg " + (m.role === "user" ? "me" : "coach");
-    el.textContent = m.text;
+    fillMsg(el, m);
     wrap.appendChild(el);
   }
-  wrap.scrollTop = wrap.scrollHeight;
+  scrollMessages(wrap, opts.scrollTo);
 }
 
 async function sendChat(text) {
@@ -3650,7 +3696,7 @@ async function sendChat(text) {
   chatHistory.push({ role: "coach", text: reply, at: Date.now() });
   chatHistory = chatHistory.slice(-40);
   await chrome.storage.local.set({ chatHistory });
-  renderChatMessages();
+  renderChatMessages({ scrollTo: "lastTop" });
 }
 
 /* ------------------------------------------------------------------ *
