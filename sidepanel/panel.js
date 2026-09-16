@@ -174,6 +174,7 @@ async function loadAssignments(retried = false) {
   $("nightly-toggle").checked = Boolean(settings.nightlyPlan);
   $("autopilot-toggle").checked = Boolean(settings.autopilot);
   $("video-frames-toggle").checked = Boolean(settings.videoFrames);
+  $("coach-speaks-toggle").checked = Boolean(settings.coachSpeaksUp);
   $("auto-done-toggle").checked = Boolean(settings.autoDone);
   applyRoleUI();
 
@@ -371,8 +372,10 @@ function renderList(meta = {}) {
   list.innerHTML = "";
   if (!ranked.length) {
     renderHero({ assignment: null, reason: "" }, false);
-    if (assignments.length) list.innerHTML = '<div class="empty-note">Nothing pending. 🏖️</div>';
-    else renderFirstRun(list);
+    if (assignments.length) {
+      list.innerHTML = '<div class="empty-note">Nothing pending. 🏖️</div>';
+      renderFinished(list, meta);
+    } else renderFirstRun(list);
     return;
   }
 
@@ -449,6 +452,39 @@ function renderList(meta = {}) {
     });
     list.appendChild(card);
   }
+  renderFinished(list, meta);
+}
+
+/**
+ * Everything else the portal has this year — completed, graded, or ticked
+ * done here — folded away at the bottom. The student (and the coach) can
+ * see the whole year; only what's pending competes for attention.
+ */
+function renderFinished(list, meta = {}) {
+  const done = assignments
+    .filter((a) => a.finished || meta?.[a.id]?.done)
+    .sort((a, b) => (b.dueDate || "").localeCompare(a.dueDate || ""));
+  if (!done.length) return;
+  const det = document.createElement("details");
+  det.className = "finished-section";
+  const sum = document.createElement("summary");
+  sum.textContent = `✓ finished this year (${done.length})`;
+  det.appendChild(sum);
+  for (const a of done) {
+    const row = document.createElement("div");
+    row.className = "finished-row";
+    row.innerHTML = `<span class="f-t"></span><span class="f-m"></span>`;
+    row.querySelector(".f-t").textContent = a.title;
+    const status = a.missing ? "missing" : a.status === 4 ? "graded" : a.finished ? "completed" : "done here";
+    row.querySelector(".f-m").textContent = `${a.course} · ${a.dueDate ? new Date(a.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "no date"} · ${status}` + (a.points ? ` · ${a.points} pts` : "");
+    if (a.url) {
+      row.style.cursor = "pointer";
+      row.title = "open in your portal";
+      row.addEventListener("click", () => openTab(a.url, true));
+    }
+    det.appendChild(row);
+  }
+  list.appendChild(det);
 }
 
 /** "tonight I have N minutes" → the list becomes tonight's triage. */
@@ -745,19 +781,19 @@ async function smartStart(assignment, minOverride) {
 
   // 4. The coach speaks first: the setup summary, then a question if it
   //    isn't sure what the assignment wants.
-  await pushCoach(setupMessage(plan, opened), { kind: "setup" });
+  await pushCoach(setupMessage(plan, opened), { kind: "setup", auto: true });
   // 4a. A video in the mix → offer the summary / key moments (spec §12.1).
   const videoTargets = [assignment.url, ...(plan.opens || []).map((o) => (o.kind === "link" ? resources.links[o.i] : resources.topics[o.i])?.url)].filter((u) => u && isVideoTab({ url: u }));
   if (videoTargets.length) {
-    await pushCoach("🎬 That's a video. When it's open, I can pull the captions and give you the key moments to jump to.", { kind: "nudge", actions: [{ label: "🎬 summarize the video", cmd: "video" }] });
+    await pushCoach("🎬 That's a video. When it's open, I can pull the captions and give you the key moments to jump to.", { kind: "nudge", auto: true, actions: [{ label: "🎬 summarize the video", cmd: "video" }] });
   }
   if (!settings.hintedHighlight) {
     await FA.store.setSettings({ hintedHighlight: true });
     settings.hintedHighlight = true;
-    await pushCoach("Tip: on the pages I opened, select any text → 🖍 annotate · ≡ summarize · ? ask pop up above it. Other page? Tap 🖍 in the header first. (Google Docs can't be highlighted — use check my draft.)", { kind: "nudge" });
+    await pushCoach("Tip: on the pages I opened, select any text → 🖍 annotate · ≡ summarize · ? ask pop up above it. Other page? Tap 🖍 in the header first. (Google Docs can't be highlighted — use check my draft.)", { kind: "nudge", auto: true });
   }
   if ((plan.confidence ?? 1) < 0.6 && plan.missing?.length && !autopilot) {
-    await pushCoach(`Before we go — ${plan.missing[0]}?`, { kind: "question" });
+    await pushCoach(`Before we go — ${plan.missing[0]}?`, { kind: "question", auto: true });
   }
 
   // 4b. Autopilot (Ben's build): no questions — do the work, then report.
@@ -786,9 +822,9 @@ async function smartStart(assignment, minOverride) {
           .filter((t) => t?.url);
         let text = "🧠 " + setupMessage(brainPlan, opened);
         if (extras.length) text += `\nmight help: ${extras.map((t) => t.name || t.text || t.url).join(" · ")}`;
-        await pushCoach(text, { kind: "setup", links: extras.map((t) => t.url) });
+        await pushCoach(text, { kind: "setup", auto: true, links: extras.map((t) => t.url) });
         if ((brainPlan.confidence ?? 1) < 0.6 && brainPlan.missing?.length) {
-          await pushCoach(`Quick check — ${brainPlan.missing[0]}?`, { kind: "question" });
+          await pushCoach(`Quick check — ${brainPlan.missing[0]}?`, { kind: "question", auto: true });
         }
       })
       .catch(() => {});
@@ -1362,6 +1398,7 @@ function renderSteps() {
       if (s.done && current.steps.every((x) => x.done)) {
         await pushCoach("Every step is checked. Turned in?", {
           kind: "checkpoint",
+          auto: true,
           actions: [{ label: "finish ✓", cmd: "finish" }, { label: "something's left", cmd: "add-step" }],
         });
       }
@@ -1444,7 +1481,9 @@ function renderThread() {
   wrap.innerHTML = "";
   if (!current) return;
   if (!current.thread.length) {
-    wrap.innerHTML = '<div class="empty-note small">the coach will set you up in a second…</div>';
+    wrap.innerHTML = settings.coachSpeaksUp
+      ? '<div class="empty-note small">the coach will set you up in a second…</div>'
+      : '<div class="empty-note small">ask the coach anything about this one — it only talks when you do.</div>';
     return;
   }
   for (const m of current.thread) {
@@ -1493,9 +1532,18 @@ function renderThread() {
   wrap.scrollTop = wrap.scrollHeight;
 }
 
+/**
+ * Post a coach message. `auto: true` marks a message the student did NOT ask
+ * for (setup notes, tips, offers, check-ins, follow-ups). Ben's rule
+ * (2026-09-15): the coach only talks when spoken to — auto messages are
+ * dropped unless ⚙ → "coach can speak up on its own" is on. The time-up
+ * bubble is the clock's control, not chatter, and always shows.
+ */
 async function pushCoach(text, extra = {}) {
   if (!current) return;
-  current.thread.push({ role: "coach", text, at: Date.now(), ...extra });
+  const { auto, ...rest } = extra;
+  if (auto && !settings.coachSpeaksUp) return;
+  current.thread.push({ role: "coach", text, at: Date.now(), ...rest });
   renderThread();
   await saveThread();
 }
@@ -2943,7 +2991,7 @@ async function autoLearnVoice(a) {
     const ok = await FA.voice.addSample({ title: a.title, text: d.text, source: "auto" });
     if (ok) {
       scheduleVoiceRebuild();
-      await pushCoach(`✨ Learned from “${a.title}” — it's now one of your writing samples (⚙ → your writing voice).`, { kind: "nudge" });
+      await pushCoach(`✨ Learned from “${a.title}” — it's now one of your writing samples (⚙ → your writing voice).`, { kind: "nudge", auto: true });
     }
   } catch {
     /* no access — fine */
@@ -3172,7 +3220,7 @@ $("photo-input").addEventListener("change", async (e) => {
   const n = r.stepsDone.length;
   await pushCoach(`📷 ${n ? `checked ${n} step${n > 1 ? "s" : ""} from your photo. ` : "nothing on the list is visibly finished yet. "}${r.feedback}`, { kind: "dev" });
   if (current.steps.every((s) => s.done)) {
-    await pushCoach("That's everything. Turned in?", { kind: "checkpoint", actions: [{ label: "finish ✓", cmd: "finish" }] });
+    await pushCoach("That's everything. Turned in?", { kind: "checkpoint", auto: true, actions: [{ label: "finish ✓", cmd: "finish" }] });
   }
 });
 
@@ -3642,6 +3690,10 @@ $("dev-toggle").addEventListener("change", async (e) => {
   await FA.store.setSettings({ devMode: e.target.checked });
   settings.devMode = e.target.checked;
   applyRoleUI();
+});
+$("coach-speaks-toggle").addEventListener("change", async (e) => {
+  settings.coachSpeaksUp = e.target.checked;
+  await FA.store.setSettings({ coachSpeaksUp: e.target.checked });
 });
 $("video-frames-toggle").addEventListener("change", async (e) => {
   settings.videoFrames = e.target.checked;

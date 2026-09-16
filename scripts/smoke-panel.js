@@ -78,6 +78,8 @@ window.eval(fs.readFileSync(path.join(ROOT, "scripts/fixtures/mock-assignments.j
 const seeded = (async () => {
   const items = await window.FA.adapters.mock.fetchAssignments();
   store.assignmentsCache = { items, fetchedAt: Date.now(), source: "blackbaud" };
+  // The coach is silent unless spoken to by default (v0.8.19); this flow checks the setup message, so let it speak.
+  store.settings = { ...(store.settings || {}), coachSpeaksUp: true };
 })();
 
 // Load scripts in the order panel.html declares them.
@@ -120,6 +122,8 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
   check("teacher-flagged MISSING item is the first card", firstBadge?.textContent === "MISSING" && cards[0].textContent.includes("Dunbar-Ortiz"), cards[0].querySelector(".card-title")?.textContent);
   check("overdue item is badged and above everything due later", cards[1].querySelector(".badge-behind")?.textContent === "OVERDUE", cards[1].querySelector(".card-title")?.textContent);
   check("the pick hero is the missing one", $("pick-title").textContent.includes("Dunbar-Ortiz"), $("pick-title").textContent);
+  const fin = window.document.querySelector("#today-list .finished-section");
+  check("graded work sits folded in 'finished this year', not in the ranking", Boolean(fin) && fin.textContent.includes("(1)") && ![...cards].some((c) => c.textContent.includes("Syllabus quiz")), fin?.querySelector("summary")?.textContent);
 
   // Smart Start on the first card (the missing one, with two attached links)
   cards[0].querySelector(".start").click();

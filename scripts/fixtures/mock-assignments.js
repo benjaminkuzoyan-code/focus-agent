@@ -48,6 +48,9 @@
     { title: "Practice quiz: organelles", course: "Biology", type: "homework", due: inDays(5), points: 10 },
     { title: "UNIT TEST: Cell Structure & Function", course: "Biology", type: "test", due: inDays(6), points: 100 },
 
+    // Already graded in the portal — belongs in the folded "finished this year" section, never in the ranking.
+    { title: "Syllabus quiz", course: "Biology", type: "homework", due: inDays(-12), points: 5, finished: true, status: 4 },
+
     // Long-range (Focus Forecast shows the storm building)
     { title: "History research project: pick topic + 3 sources", course: "World History", type: "project", due: inDays(8), points: 40 },
     { title: "Read chapters 5-6", course: "English 9", type: "reading", due: inDays(9), points: 10 },
@@ -74,6 +77,7 @@
         // The extra fields real adapters add (see adapters/blackbaud.js).
         if (d.missing) a.missing = true;
         if (d.links) a.links = d.links;
+        if (d.finished) { a.finished = true; a.status = d.status ?? 1; }
         return a;
       });
     },

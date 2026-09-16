@@ -182,6 +182,7 @@
             userId,
             name: [user.FirstName, user.LastName].filter(Boolean).join(" ") || user.UserName || "",
             schoolYear: current?.Label || "",
+            schoolYearStart: FA.toISO(current?.YearStart) || null, // e.g. "6/16/2026" → the whole year's assignments
             school: location.hostname.split(".")[0],
           };
         })().catch((e) => {
@@ -195,12 +196,21 @@
     /* ---------------------------------------------------------------- *
      * Assignments (the original feature)
      * ---------------------------------------------------------------- */
-    async fetchAssignments({ includeFinished = false, monthsAhead = 4, daysBack = 60 } = {}) {
-      // Start two months back so OVERDUE and MISSING work is in the list. A
-      // missing assignment from three weeks ago is exactly the one the
-      // student needs to see; 14 days used to hide it.
+    async fetchAssignments({ includeFinished = true, monthsAhead = 6, daysBack = 120 } = {}) {
+      // The WHOLE school year: everything the student can see in Assignment
+      // Center, finished or not (Ben, 2026-09-15: "why can't it see everything
+      // in Blackbaud, including old assignments"). Finished ones carry
+      // `finished: true`; the list keeps them out of the way, the coach and
+      // the classes view can still see them. Start = the school year's first
+      // day (SchoolYearsGet.YearStart), else 120 days back.
       const today = new Date();
       today.setDate(today.getDate() - daysBack);
+      try {
+        const { schoolYearStart } = await this.fetchProfile();
+        if (schoolYearStart) today.setTime(new Date(schoolYearStart).getTime());
+      } catch {
+        /* profile unavailable — the day window still works */
+      }
       const end = new Date();
       end.setMonth(end.getMonth() + monthsAhead);
 

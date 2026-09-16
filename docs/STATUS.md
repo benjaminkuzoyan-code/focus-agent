@@ -1,6 +1,16 @@
 # STATUS — rewritten by Claude Code at the end of every session
 
-**Updated:** 2026-09-15 · **Version:** 0.8.18 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+**Updated:** 2026-09-15 · **Version:** 0.8.19 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+
+## Later the same day (2026-09-15): silent coach + the whole school year (v0.8.19)
+
+| Ben's ask | Fix | Regression |
+|---|---|---|
+| "Stop writing shit in the coach chat if it isn't a response to an input I put in" | `pushCoach(text, {auto: true})` marks unsolicited messages; they're dropped unless `settings.coachSpeaksUp` (⚙ row, **off by default**). Marked: Smart Start setup note + the 🧠 upgrade, the highlight tip, the 🎬 offer, "before we go / quick check" questions, "every step is checked — turned in?", "that's everything — turned in?", "learned from your doc". Kept: everything that answers a tap or a message, and the time-up bubble (the clock's +5/+10/done/stop control). Empty-thread placeholder says the coach only talks when you do | smoke seeds `coachSpeaksUp: true` for the setup-message flow |
+| "Why can't the software see everything in Blackbaud including old assignments" | Live check: Assignment Center only ever returns the current school year (76 items whether asked for 60 or 400 days), but **41 of the 76 were being dropped as finished** (status 1 completed, 4 graded) and the window was 60 days. Now: `fetchAssignments` reads from `SchoolYearsGet.YearStart` (6/16/2026) and includes finished work flagged `finished`; `rankAssignments` / forecast skip finished; the list shows a folded **✓ finished this year (N)** section (course · date · status · pts, tap → portal) | smoke: graded fixture item sits in the folded section, not the ranking |
+
+- `npm test` unchanged: 85 / 28 / 14 / 17. Smoke: same 6 pre-existing failures.
+- Note for the future: previous-year assignments are not in Assignment Center at all; "old" = this year's finished work. Grades for finished work are already in the snapshot (classes view).
 
 ## This session (2026-09-15): 👁 PDF pages read by eye + 🎬 video summaries (v0.8.18) — spec §11.1, §12.1
 

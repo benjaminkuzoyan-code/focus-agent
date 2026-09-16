@@ -2,7 +2,7 @@
 
 **This file is the source of truth for what Focus Agent is supposed to do.** Code is built to match it; tests prove the match; every other description (store listing, privacy policy, landing page, parent note) is derived from it. To change the product, change the section here first, then the code, then the test.
 
-Generated from the code at v0.8.16 (2026-09-13), updated for v0.8.17 (2026-09-14: missing/overdue fix, attached links, photo) and v0.8.18 (2026-09-15: PDF pages by eye, video summaries); **reviewed by Ben by voice 2026-09-13** — his direction is folded in below and marked 🎯 (decided) or 💬 (to discuss). Each section says what the student does, what happens, what must never happen, and what proves it. Status marks: ✅ proven by an automated test · 👁 checked by hand in the browser harness · ⚠️ implemented but never run for real · ❌ not built.
+Generated from the code at v0.8.16 (2026-09-13), updated for v0.8.17 (2026-09-14: missing/overdue fix, attached links, photo) v0.8.18 (2026-09-15: PDF pages by eye, video summaries) and v0.8.19 (2026-09-15: silent coach, whole school year); **reviewed by Ben by voice 2026-09-13** — his direction is folded in below and marked 🎯 (decided) or 💬 (to discuss). Each section says what the student does, what happens, what must never happen, and what proves it. Status marks: ✅ proven by an automated test · 👁 checked by hand in the browser harness · ⚠️ implemented but never run for real · ❌ not built.
 
 Ben reviews this and marks what's wrong or not what he wants. Claude and Codex work from the reviewed version.
 
@@ -23,7 +23,7 @@ Focus Agent is a Chrome side panel for a student who wants to do well and can't 
 
 **Promise.** 🎯 Everything the student can see in their portal, the coach can see too: assignments with the teacher's instructions, grades, syllabus/topics, schedule. No typing, no API key: the extension runs inside the student's own logged-in page and asks the portal what the page itself asks.
 
-**What happens.** The student opens their school's assignment page in a tab and taps ↻ (that button reads the portal in the browser; no coach call, no key). A content script calls the portal's own endpoints with the session already logged in, normalizes the result into one assignment shape (`adapters/schema.js`), caches it, and (where the portal exposes it) builds a Student Snapshot: classes, current grades, graded scores, schedule, topics, the personal calendar-feed link. Overdue and missing work from the last 60 days is included, and for every pending assignment the teacher's ATTACHED links and files are fetched from the assignment's detail endpoint (they are not in the description text).
+**What happens.** The student opens their school's assignment page in a tab and taps ↻ (that button reads the portal in the browser; no coach call, no key). A content script calls the portal's own endpoints with the session already logged in, normalizes the result into one assignment shape (`adapters/schema.js`), caches it, and (where the portal exposes it) builds a Student Snapshot: classes, current grades, graded scores, schedule, topics, the personal calendar-feed link. 🎯 **The whole school year is read** (from the portal's own year-start date), finished work included and flagged, so nothing the student can see in the portal is invisible here; for every pending assignment the teacher's ATTACHED links and files are fetched from the assignment's detail endpoint (they are not in the description text).
 
 **Per portal.**
 - Blackbaud / myPoly: full read. ✅ field mapping verified on Ben's account. ✅ **v0.8.17:** status code 2 is OVERDUE (was mis-read as "completed", which hid every overdue and missing assignment); `missing_ind` = teacher-marked missing and overrides a "completed" tick; attached links/files come from `/api/assignment2/read/<id>/` (verified live 2026-09-14, 76 items).
@@ -49,6 +49,8 @@ Focus Agent is a Chrome side panel for a student who wants to do well and can't 
 **Promise.** The student sees what to start, not a to-do list.
 
 **What happens.** Assignments are ranked by urgency (teacher-marked MISSING first, then overdue, then due-soon, size, points, and the student's own pace history). 🎯 **Missing and overdue work is pinned in its own red section at the top of the list** ("⚠️ N missing / overdue — clear these first"), each card badged MISSING or OVERDUE with the date it was due; the coach's pick never looks past that section (✅ v0.8.17, smoke test). The coach's pick sits at the top as a "start here" card with one full-width ▶ Smart Start and the reason in one sentence; the rules pick appears instantly and the coach upgrades it in place. Below: a 7-day forecast strip, "tonight I have" time chips (all/30m/1h/1.5h/2h) that reorder the list to fit and say what doesn't fit, an "noticed something" card when an assignment has been visible for days with zero sessions, then every assignment as a card with its own ▶ and a ✓ for "already done". A running clock shows as a resume banner. 👁
+
+🎯 **Everything else the portal has this year** — completed, graded, or ticked done here — sits folded at the bottom as "✓ finished this year (N)", each row with course, date, status and a tap to open it in the portal. It never competes with pending work (✅ v0.8.19, smoke test).
 
 **Must never.** Bury the primary action below the fold at the panel's minimum width.
 
@@ -91,6 +93,8 @@ Focus Agent is a Chrome side panel for a student who wants to do well and can't 
 **Promise.** A coach that knows this assignment, the student's files, their grades and their week, and helps like a sharp older friend — with one suggestion at a time, not a wall of buttons.
 
 **What happens.** In the work view the chat is scoped to the assignment: it sees the assignment, the checklist, attached files with highlights, the open Google Doc's text, the snapshot (grades as numbers, schedule), session stats and the conversation. Replies are plain text.
+
+🎯 **The coach only talks when spoken to (decided 2026-09-15, ✅ v0.8.19).** Every message that isn't an answer to something the student just did — the Smart Start setup note, tips, the video offer, "before we go" questions, "every step is checked, turned in?" check-ins, "learned from your doc" — is dropped. The one exception is the time-up bubble, which is the clock's control (+5 / +10 / done / stop). ⚙ → "coach can speak up on its own" turns the extras back on; it is off by default for everyone.
 
 🎯 **Planned: one bubble, not nineteen chips.** The coach offers the single most useful next thing as one bubble that disappears when used and is replaced by the next: *explain this* → *break it down* → *make me a practice quiz* (or *check my draft* for writing, *quiz me* for tests), in an order that follows the work. Everything else stays reachable by typing. The current chip row (I'm stuck / explain / check my draft / practice test / ⋯ nine more) is the thing to replace. ❌ not built; design in the next brief.
 
