@@ -60,7 +60,7 @@ One tap (Smart Start) gets a student from "can't start" to "working, with struct
 
 ## Context
 
-- Chrome side-panel extension + a small Node coach server that holds the AI key and never stores requests.
+- Chrome side-panel extension + a small Python (stdlib `http.server`) coach server (`bridge/coach_server.py`) that holds the AI key and never stores requests. Deploy scaffolding for Fly.io already exists in `deploy/` (Dockerfile, `fly.toml`, systemd unit, README) — it's just never been deployed or given a real API key.
 - Per-portal adapters are reverse-engineered, student-session-only API clients normalized into one assignment shape (`adapters/schema.js`); Blackbaud/myPoly is the only fully-proven one.
 - Pilot audience: Ben plus 4–5 friends he onboards in person, spanning Blackbaud (Poly), Canvas, Google Classroom, and Aeries schools.
 - `docs/SPEC.md` is the source of truth for product behavior — reviewed by Ben by voice on 2026-09-13, with his direction marked 🎯 (decided) or 💬 (to discuss) inline. Code and tests are built to match it; this PROJECT.md and the roadmap should stay traceable back to it.
@@ -72,7 +72,7 @@ One tap (Smart Start) gets a student from "can't start" to "working, with struct
 - **Legal/Compliance**: Must be legal in every US state and give no school a reason to act against a student for using it — only reads what the student's own login can already see, never bypasses a school control, never shares a password. Any feature that can't meet this is cut, not shipped.
 - **Privacy**: Portal cookies and passwords never leave the browser; coach requests carry only what the feature needs, are never stored server-side, and nothing is sent without a coach code. Never sent anywhere, ever: cookies, passwords, name, student id, email, teacher contact details, the calendar feed link.
 - **Product policy (tutor, not ghostwriter)**: The coach never produces text a student would hand in, never gives the final answer to graded work, and never does an annotation the assignment asked the student to do — enforced server-side for every student code; developer mode exists only for Ben and is never distributed.
-- **Tech stack**: Chrome extension (Manifest V3-style side panel) + Node coach server with a mock engine for tests; `npm test` runs four suites before every friends build.
+- **Tech stack**: Chrome extension (Manifest V3-style side panel) + Python stdlib coach server with a mock engine for tests; `npm test` runs four suites before every friends build.
 - **Distribution**: Pilot distributes via unpacked zip (`npm run package:friends`); Chrome Web Store listing is a later concern.
 
 ## Key Decisions
