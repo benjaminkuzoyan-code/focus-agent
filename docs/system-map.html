@@ -1,0 +1,527 @@
+<title>Focus Agent System Map</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  :root {
+    --ground: #f6f7fb;
+    --paper: #ffffff;
+    --ink: #1c2233;
+    --ink-2: #4a5470;
+    --ink-3: #7b849e;
+    --line: #d9dde9;
+    --line-2: #eceef5;
+    --indigo: #4f5bd5;
+    --indigo-soft: #e8eafb;
+    --amber: #b7791f;
+    --amber-soft: #fbf1dc;
+    --red: #c9364f;
+    --red-soft: #fce7ea;
+    --green: #2b7a4b;
+    --green-soft: #e3f3e8;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "Source Sans 3", "Helvetica Neue", Arial, sans-serif;
+    --display: "Bricolage Grotesque", "Avenir Next", "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #101320; --paper: #171b2b; --ink: #e8eaf3; --ink-2: #b4bad0; --ink-3: #7f879f;
+      --line: #2a3047; --line-2: #1f2438; --indigo: #8f98ff; --indigo-soft: #232a4d;
+      --amber: #e2b04a; --amber-soft: #3a2f16; --red: #ff7b8f; --red-soft: #3c1c24; --green: #6fcf93; --green-soft: #17311f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #101320; --paper: #171b2b; --ink: #e8eaf3; --ink-2: #b4bad0; --ink-3: #7f879f;
+    --line: #2a3047; --line-2: #1f2438; --indigo: #8f98ff; --indigo-soft: #232a4d;
+    --amber: #e2b04a; --amber-soft: #3a2f16; --red: #ff7b8f; --red-soft: #3c1c24; --green: #6fcf93; --green-soft: #17311f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--sans); font-size: 16.5px; line-height: 1.55; padding-block: 0 80px; padding-inline: 20px; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  header { padding-block: 44px 20px; border-bottom: 1px solid var(--line); }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+  h1 { font-family: var(--display); font-weight: 700; font-size: clamp(34px, 5vw, 50px); line-height: 1.05; margin: 8px 0 12px; text-wrap: balance; letter-spacing: -0.01em; }
+  .lede { font-size: 19px; color: var(--ink-2); max-width: 62ch; margin: 0; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 6px 14px; padding-block: 14px; border-bottom: 1px solid var(--line); font-size: 14px; }
+  nav.toc a { color: var(--ink-2); text-decoration: none; border-bottom: 1px solid transparent; }
+  nav.toc a:hover, nav.toc a:focus-visible { color: var(--indigo); border-color: var(--indigo); outline: none; }
+  section { padding-block: 36px 8px; }
+  h2 { font-family: var(--display); font-weight: 700; font-size: 27px; line-height: 1.15; margin: 0 0 6px; letter-spacing: -0.01em; text-wrap: balance; }
+  h3 { font-family: var(--display); font-weight: 600; font-size: 18px; margin: 26px 0 6px; }
+  p { max-width: 68ch; margin: 0 0 12px; }
+  .why { color: var(--ink-2); }
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--line-2); padding: 1px 5px; border-radius: 4px; }
+  figure { margin: 18px 0 22px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 16px 16px 10px; }
+  figure svg { width: 100%; height: auto; display: block; color: var(--ink); font-family: var(--sans); }
+  figure svg .mono { font-family: var(--mono); }
+  figcaption { font-size: 14px; color: var(--ink-2); margin-top: 10px; max-width: 70ch; }
+  .box { fill: var(--paper); stroke: currentColor; stroke-width: 1.2; }
+  .box-soft { fill: var(--line-2); stroke: var(--line); stroke-width: 1; }
+  .box-indigo { fill: var(--indigo-soft); stroke: var(--indigo); stroke-width: 1.4; }
+  .box-amber { fill: var(--amber-soft); stroke: var(--amber); stroke-width: 1.4; }
+  .box-red { fill: var(--red-soft); stroke: var(--red); stroke-width: 1.2; }
+  .box-green { fill: var(--green-soft); stroke: var(--green); stroke-width: 1.2; }
+  .t { font-size: 12.5px; fill: currentColor; }
+  .t-b { font-size: 13px; font-weight: 600; fill: currentColor; }
+  .t-s { font-size: 11px; fill: var(--ink-3); }
+  .t-m { font-family: var(--mono); font-size: 10.5px; fill: var(--ink-2); }
+  .t-i { fill: var(--indigo); font-weight: 600; font-size: 12.5px; }
+  .t-a { fill: var(--amber); font-weight: 600; font-size: 12px; }
+  .t-r { fill: var(--red); font-weight: 600; font-size: 12px; }
+  .ln { stroke: currentColor; stroke-width: 1.3; fill: none; }
+  .ln-i { stroke: var(--indigo); stroke-width: 1.6; fill: none; }
+  .ln-a { stroke: var(--amber); stroke-width: 1.6; fill: none; }
+  .ln-d { stroke: currentColor; stroke-width: 1.2; fill: none; stroke-dasharray: 4 4; }
+  .ln-r { stroke: var(--red); stroke-width: 1.4; fill: none; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; margin: 10px 0 16px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+  td.m, td .m { font-family: var(--mono); font-size: 13px; }
+  .tscroll { overflow-x: auto; }
+  .pill { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); vertical-align: 1px; }
+  .pill.red { color: var(--red); border-color: var(--red); }
+  .pill.green { color: var(--green); border-color: var(--green); }
+  .pill.indigo { color: var(--indigo); border-color: var(--indigo); }
+  .pill.amber { color: var(--amber); border-color: var(--amber); }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 12px 0 18px; }
+  .card { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .card h4 { margin: 0 0 6px; font-family: var(--display); font-size: 16px; font-weight: 600; }
+  .card p { font-size: 14.5px; margin: 0; color: var(--ink-2); }
+  .card .m { font-family: var(--mono); font-size: 12px; color: var(--ink-3); display: block; margin-top: 8px; }
+  ul { padding-left: 20px; max-width: 68ch; }
+  li { margin: 4px 0; }
+  .num { font-family: var(--mono); font-size: 12px; color: var(--indigo); margin-right: 8px; }
+  .foot { margin-top: 44px; padding-top: 16px; border-top: 1px solid var(--line); font-size: 13.5px; color: var(--ink-3); }
+  @media (prefers-reduced-motion: no-preference) { nav.toc a { transition: color 0.15s; } }
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">Focus Agent · v0.8.21 · 2026-09-17</div>
+  <h1>Focus Agent System Map</h1>
+  <p class="lede">Every piece of the extension, what talks to what, and where the data goes. Drawn from the code as it ships today, so you can point at any box and find the file.</p>
+</header>
+
+<nav class="toc" aria-label="Sections">
+  <a href="#pieces">1 · The four pieces</a>
+  <a href="#portal">2 · Reading Blackbaud</a>
+  <a href="#list">3 · Ranking the list</a>
+  <a href="#smartstart">4 · Smart Start</a>
+  <a href="#coach">5 · A coach call</a>
+  <a href="#images">6 · Eyes: 📸 📷 👁 🎬</a>
+  <a href="#clock">7 · The clock</a>
+  <a href="#storage">8 · What's stored where</a>
+  <a href="#gates">9 · The test gates</a>
+</nav>
+
+<section id="pieces">
+  <h2>1 · The four pieces</h2>
+  <p>Focus Agent is not one program. It is three pieces of a Chrome extension that can only talk through messages, plus a separate Python server on your Mac that holds the model. Nothing else runs anywhere.</p>
+  <figure>
+    <svg viewBox="0 0 860 330" role="img" aria-label="Four boxes: the side panel, the service worker and the content script inside Chrome, and the bridge server outside Chrome, with the messages between them labelled.">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+        <marker id="ar-i" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--indigo)"/></marker>
+        <marker id="ar-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--amber)"/></marker>
+      </defs>
+      <!-- Chrome boundary -->
+      <rect x="14" y="14" width="560" height="300" rx="12" class="box-soft"/>
+      <text x="28" y="36" class="t-s">CHROME (one browser profile)</text>
+      <!-- side panel -->
+      <rect x="34" y="52" width="230" height="118" rx="8" class="box-indigo"/>
+      <text x="48" y="76" class="t-b">Side panel</text>
+      <text x="48" y="94" class="t-m">sidepanel/panel.js · 3.9k lines</text>
+      <text x="48" y="112" class="t">the UI: list, work view, chat, clock,</text>
+      <text x="48" y="128" class="t">settings. Runs only while open.</text>
+      <text x="48" y="156" class="t-s">talks to: worker, content script, bridge</text>
+      <!-- service worker -->
+      <rect x="34" y="196" width="230" height="100" rx="8" class="box"/>
+      <text x="48" y="220" class="t-b">Service worker</text>
+      <text x="48" y="238" class="t-m">background.js</text>
+      <text x="48" y="256" class="t">alarms, chime, idle watchdog, drift</text>
+      <text x="48" y="272" class="t">nudges, PDF fetch. Sleeps when idle.</text>
+      <!-- content script -->
+      <rect x="320" y="52" width="230" height="118" rx="8" class="box"/>
+      <text x="334" y="76" class="t-b">Content script</text>
+      <text x="334" y="94" class="t-m">content.js + adapters/*.js</text>
+      <text x="334" y="112" class="t">injected INTO the myPoly tab, so its</text>
+      <text x="334" y="128" class="t">fetches carry your login cookies.</text>
+      <text x="334" y="156" class="t-s">only piece that can read the portal</text>
+      <!-- portal -->
+      <rect x="320" y="196" width="230" height="100" rx="8" class="box-soft"/>
+      <text x="334" y="220" class="t-b">polytechnic.myschoolapp.com</text>
+      <text x="334" y="238" class="t-m">/api/DataDirect/… (Blackbaud JSON)</text>
+      <text x="334" y="256" class="t">the school's own endpoints, the</text>
+      <text x="334" y="272" class="t">same ones the portal page calls.</text>
+      <!-- bridge -->
+      <rect x="620" y="52" width="226" height="244" rx="8" class="box-amber"/>
+      <text x="634" y="76" class="t-b">Coach bridge</text>
+      <text x="634" y="94" class="t-m">bridge/coach_server.py</text>
+      <text x="634" y="112" class="t">Python, 127.0.0.1:8000</text>
+      <text x="634" y="128" class="t">Builds every prompt, decides</text>
+      <text x="634" y="144" class="t">student vs developer, calls the</text>
+      <text x="634" y="160" class="t">model. Has NO login, NO portal.</text>
+      <text x="634" y="192" class="t-s">engine today: claude-cli</text>
+      <text x="634" y="208" class="t-s">(headless `claude -p`, your login)</text>
+      <text x="634" y="224" class="t-s">engine later: api (key in</text>
+      <text x="634" y="240" class="t-s">~/.focus-agent/api_key)</text>
+      <text x="634" y="272" class="t-a">↑ the only place a model runs</text>
+      <!-- arrows -->
+      <line x1="264" y1="111" x2="318" y2="111" class="ln" marker-end="url(#ar)" marker-start="url(#ar)"/>
+      <text x="291" y="103" class="t-s" text-anchor="middle">GET_ASSIGNMENTS</text>
+      <line x1="435" y1="170" x2="435" y2="194" class="ln" marker-end="url(#ar)" marker-start="url(#ar)"/>
+      <text x="446" y="186" class="t-s">fetch + cookies</text>
+      <line x1="149" y1="170" x2="149" y2="194" class="ln" marker-end="url(#ar)" marker-start="url(#ar)"/>
+      <text x="158" y="186" class="t-s">SESSION_STARTED · ACTIVITY · FETCH_PDF</text>
+      <line x1="264" y1="246" x2="318" y2="246" class="ln-d" marker-end="url(#ar)"/>
+      <text x="291" y="238" class="t-s" text-anchor="middle">CACHE</text>
+      <path d="M264 80 C 420 20, 560 20, 618 80" class="ln-a" marker-end="url(#ar-a)" marker-start="url(#ar-a)"/>
+      <text x="440" y="32" class="t-a" text-anchor="middle">POST /coach {method, payload}</text>
+      <text x="720" y="312" class="t-s" text-anchor="middle">outside Chrome · your Mac</text>
+    </svg>
+    <figcaption>Three extension pieces inside Chrome can only exchange messages; the bridge outside Chrome only ever receives JSON from the panel over localhost. The portal is read from inside its own tab, which is why your password never touches the extension.</figcaption>
+  </figure>
+  <div class="grid2">
+    <div class="card"><h4>Why the content script exists</h4><p>An extension page can't call the school's API with your session. A script injected into the myPoly tab can, because the browser attaches that tab's cookies. Everything portal-shaped starts there.</p><span class="m">adapters/blackbaud.js · canvas.js · classroom.js</span></div>
+    <div class="card"><h4>Why the bridge is a separate program</h4><p>Chrome extensions can't run Python or hold a secret safely. The bridge keeps the model key (or your Claude login) on the machine, enforces who is a student and who is you, and turns every feature into one prompt builder.</p><span class="m">BUILDERS = {pick, setup, chat, readScreen, …}</span></div>
+  </div>
+</section>
+
+<section id="portal">
+  <h2>2 · Reading Blackbaud</h2>
+  <p>Tapping ↻ in the panel asks the myPoly tab for assignments. The adapter calls the same JSON endpoints the portal page uses, normalizes each item into one <code>Assignment</code> shape, and fetches the teacher's attached links for anything still pending.</p>
+  <figure>
+    <svg viewBox="0 0 860 300" role="img" aria-label="Sequence: panel asks content script, content script calls three Blackbaud endpoints in order, results are normalized, cached in the worker and returned to the panel.">
+      <defs><marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+      <!-- lanes -->
+      <text x="60" y="26" class="t-b" text-anchor="middle">panel</text>
+      <text x="300" y="26" class="t-b" text-anchor="middle">content script</text>
+      <text x="640" y="26" class="t-b" text-anchor="middle">Blackbaud API</text>
+      <line x1="60" y1="36" x2="60" y2="290" class="ln-d"/>
+      <line x1="300" y1="36" x2="300" y2="290" class="ln-d"/>
+      <line x1="640" y1="36" x2="640" y2="290" class="ln-d"/>
+      <!-- 1 -->
+      <line x1="62" y1="60" x2="298" y2="60" class="ln" marker-end="url(#ar2)"/>
+      <text x="180" y="52" class="t" text-anchor="middle">GET_ASSIGNMENTS</text>
+      <!-- 2 profile -->
+      <line x1="302" y1="90" x2="638" y2="90" class="ln" marker-end="url(#ar2)"/>
+      <text x="470" y="82" class="t-m" text-anchor="middle">/api/webapp/context → who am I</text>
+      <line x1="302" y1="118" x2="638" y2="118" class="ln" marker-end="url(#ar2)"/>
+      <text x="470" y="110" class="t-m" text-anchor="middle">/api/datadirect/SchoolYearsGet → YearStart = 6/16/2026</text>
+      <!-- 3 list -->
+      <line x1="302" y1="150" x2="638" y2="150" class="ln" marker-end="url(#ar2)"/>
+      <text x="470" y="142" class="t-m" text-anchor="middle">/api/DataDirect/AssignmentCenterAssignments/ dateStart=YearStart</text>
+      <line x1="638" y1="168" x2="302" y2="168" class="ln" marker-end="url(#ar2)"/>
+      <text x="470" y="182" class="t-s" text-anchor="middle">76 items this year · every status</text>
+      <!-- 4 details -->
+      <line x1="302" y1="206" x2="638" y2="206" class="ln" marker-end="url(#ar2)"/>
+      <text x="470" y="198" class="t-m" text-anchor="middle">/api/assignment2/read/&lt;assignment_id&gt;/ · pending items only, 4 at a time</text>
+      <line x1="638" y1="224" x2="302" y2="224" class="ln" marker-end="url(#ar2)"/>
+      <text x="470" y="238" class="t-s" text-anchor="middle">LinkItems + DownloadItems → a.links (attached first)</text>
+      <!-- 5 back -->
+      <line x1="298" y1="262" x2="62" y2="262" class="ln" marker-end="url(#ar2)"/>
+      <text x="180" y="254" class="t" text-anchor="middle">{assignments} + CACHE_ASSIGNMENTS → worker</text>
+      <text x="180" y="280" class="t-s" text-anchor="middle">panel also asks GET_SNAPSHOT: classes, grades, schedule, topics</text>
+    </svg>
+    <figcaption>One ↻ is about five portal calls plus one per pending assignment with attachments. Attached links are not in the description text, which is why the separate detail call exists.</figcaption>
+  </figure>
+  <h3>What the status codes really mean</h3>
+  <p class="why">This table is the bug that hid your missing work for weeks. The adapter's own comment used to say 2 meant "completed".</p>
+  <div class="tscroll"><table>
+    <tr><th>assignment_status</th><th>Blackbaud meaning</th><th>Focus Agent treats it as</th></tr>
+    <tr><td class="m">-1</td><td>To do</td><td>pending, ranked</td></tr>
+    <tr><td class="m">0</td><td>In progress</td><td>pending, ranked</td></tr>
+    <tr><td class="m">1</td><td>Completed (you ticked it)</td><td><span class="pill">finished</span> folded at the bottom</td></tr>
+    <tr><td class="m">2</td><td>Overdue: past due, never ticked</td><td><span class="pill red">OVERDUE</span> for 5 days, then <span class="pill">stale</span> folded</td></tr>
+    <tr><td class="m">4</td><td>Graded</td><td><span class="pill">finished</span> folded at the bottom</td></tr>
+    <tr><td class="m">missing_ind = true</td><td>Teacher marked it missing (any status)</td><td><span class="pill red">MISSING</span> always on top, overrides everything</td></tr>
+  </table></div>
+</section>
+
+<section id="list">
+  <h2>3 · Ranking the list</h2>
+  <p>The panel never shows the raw feed. <code>lib/priority.js</code> scores every pending item, and the list pins the behind section on top, the ranked rest in the middle, and the year's finished work folded underneath.</p>
+  <figure>
+    <svg viewBox="0 0 860 250" role="img" aria-label="Funnel: 76 assignments split into finished, stale, and pending; pending are scored by urgency; the list shows a missing/overdue section on top, then ranked, then a folded finished section.">
+      <defs><marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+      <rect x="20" y="90" width="150" height="70" rx="8" class="box-soft"/>
+      <text x="95" y="118" class="t-b" text-anchor="middle">76 this year</text>
+      <text x="95" y="138" class="t-s" text-anchor="middle">from the cache</text>
+      <!-- split -->
+      <line x1="170" y1="110" x2="248" y2="60" class="ln" marker-end="url(#ar3)"/>
+      <line x1="170" y1="125" x2="248" y2="125" class="ln" marker-end="url(#ar3)"/>
+      <line x1="170" y1="140" x2="248" y2="190" class="ln" marker-end="url(#ar3)"/>
+      <rect x="250" y="38" width="170" height="44" rx="8" class="box"/>
+      <text x="335" y="58" class="t-b" text-anchor="middle">finished (1, 4)</text>
+      <text x="335" y="74" class="t-s" text-anchor="middle">a.finished · not ranked</text>
+      <rect x="250" y="103" width="170" height="44" rx="8" class="box-indigo"/>
+      <text x="335" y="123" class="t-b" text-anchor="middle">pending</text>
+      <text x="335" y="139" class="t-s" text-anchor="middle">-1, 0, 2 ≤ 5 days, missing</text>
+      <rect x="250" y="168" width="170" height="44" rx="8" class="box"/>
+      <text x="335" y="188" class="t-b" text-anchor="middle">stale (2, &gt; 5 days)</text>
+      <text x="335" y="204" class="t-s" text-anchor="middle">FA.isStale · not ranked</text>
+      <!-- score -->
+      <line x1="420" y1="125" x2="478" y2="125" class="ln-i" marker-end="url(#ar3)"/>
+      <rect x="480" y="90" width="170" height="70" rx="8" class="box-indigo"/>
+      <text x="565" y="112" class="t-b" text-anchor="middle">urgencyScore</text>
+      <text x="565" y="128" class="t-s" text-anchor="middle">missing +2000 · overdue +1000</text>
+      <text x="565" y="144" class="t-s" text-anchor="middle">time left − effort · points · type</text>
+      <!-- list -->
+      <line x1="650" y1="125" x2="698" y2="125" class="ln-i" marker-end="url(#ar3)"/>
+      <rect x="700" y="30" width="146" height="190" rx="8" class="box"/>
+      <text x="773" y="50" class="t-s" text-anchor="middle">THE LIST</text>
+      <rect x="710" y="60" width="126" height="40" rx="5" class="box-red"/>
+      <text x="773" y="77" class="t-r" text-anchor="middle">⚠ missing / overdue</text>
+      <text x="773" y="92" class="t-s" text-anchor="middle">pick hero can't skip it</text>
+      <rect x="710" y="108" width="126" height="60" rx="5" class="box-indigo"/>
+      <text x="773" y="128" class="t" text-anchor="middle">up next</text>
+      <text x="773" y="144" class="t-s" text-anchor="middle">ranked by score</text>
+      <text x="773" y="158" class="t-s" text-anchor="middle">forecast strip above</text>
+      <rect x="710" y="176" width="126" height="34" rx="5" class="box-soft"/>
+      <text x="773" y="197" class="t-s" text-anchor="middle">✓ finished this year (N) ▸</text>
+      <line x1="335" y1="82" x2="335" y2="101" class="ln-d"/>
+      <path d="M420 60 C 560 60, 620 200, 705 195" class="ln-d"/>
+      <path d="M420 190 C 520 190, 600 200, 705 200" class="ln-d"/>
+    </svg>
+    <figcaption>Finished and stale items never reach the scorer; they go straight to the folded section. Teacher-marked missing carries the biggest boost, so it sits above even plain overdue.</figcaption>
+  </figure>
+</section>
+
+<section id="smartstart">
+  <h2>4 · Smart Start</h2>
+  <p>One tap does six things, in this order. The clock starts before any tab opens, because waiting on tabs is how starts used to die.</p>
+  <figure>
+    <svg viewBox="0 0 860 210" role="img" aria-label="Six steps of Smart Start in order: permission, park distractors, start the clock, enter the work view, open the assignment and every link it carries, then a silent setup plan.">
+      <defs><marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+      <g>
+        <rect x="14" y="40" width="126" height="86" rx="8" class="box"/>
+        <text x="77" y="62" class="t-b" text-anchor="middle">1 · permission</text>
+        <text x="77" y="80" class="t-s" text-anchor="middle">for the sites the</text>
+        <text x="77" y="94" class="t-s" text-anchor="middle">assignment links to</text>
+        <text x="77" y="112" class="t-s" text-anchor="middle">(inside the click)</text>
+      </g>
+      <line x1="140" y1="83" x2="152" y2="83" class="ln" marker-end="url(#ar4)"/>
+      <g>
+        <rect x="154" y="40" width="126" height="86" rx="8" class="box"/>
+        <text x="217" y="62" class="t-b" text-anchor="middle">2 · park tabs</text>
+        <text x="217" y="80" class="t-s" text-anchor="middle">YouTube, TikTok… →</text>
+        <text x="217" y="94" class="t-s" text-anchor="middle">a minimized window</text>
+        <text x="217" y="112" class="t-s" text-anchor="middle">except assignment hosts</text>
+      </g>
+      <line x1="280" y1="83" x2="292" y2="83" class="ln" marker-end="url(#ar4)"/>
+      <g>
+        <rect x="294" y="40" width="126" height="86" rx="8" class="box-indigo"/>
+        <text x="357" y="62" class="t-b" text-anchor="middle">3 · start clock</text>
+        <text x="357" y="80" class="t-s" text-anchor="middle">length from YOUR</text>
+        <text x="357" y="94" class="t-s" text-anchor="middle">past sittings, 5–25</text>
+        <text x="357" y="112" class="t-s" text-anchor="middle">activeSession in storage</text>
+      </g>
+      <line x1="420" y1="83" x2="432" y2="83" class="ln" marker-end="url(#ar4)"/>
+      <g>
+        <rect x="434" y="40" width="126" height="86" rx="8" class="box"/>
+        <text x="497" y="62" class="t-b" text-anchor="middle">4 · work view</text>
+        <text x="497" y="80" class="t-s" text-anchor="middle">checklist, files,</text>
+        <text x="497" y="94" class="t-s" text-anchor="middle">chat, ring clock</text>
+        <text x="497" y="112" class="t-s" text-anchor="middle">enterWork()</text>
+      </g>
+      <line x1="560" y1="83" x2="572" y2="83" class="ln" marker-end="url(#ar4)"/>
+      <g>
+        <rect x="574" y="40" width="126" height="86" rx="8" class="box-indigo"/>
+        <text x="637" y="62" class="t-b" text-anchor="middle">5 · open tabs</text>
+        <text x="637" y="80" class="t-s" text-anchor="middle">the assignment page +</text>
+        <text x="637" y="94" class="t-s" text-anchor="middle">EVERY link it carries</text>
+        <text x="637" y="112" class="t-s" text-anchor="middle">PDFs → our viewer</text>
+      </g>
+      <line x1="700" y1="83" x2="712" y2="83" class="ln" marker-end="url(#ar4)"/>
+      <g>
+        <rect x="714" y="40" width="132" height="86" rx="8" class="box-amber"/>
+        <text x="780" y="62" class="t-b" text-anchor="middle">6 · setup plan</text>
+        <text x="780" y="80" class="t-s" text-anchor="middle">rules now, brain later:</text>
+        <text x="780" y="94" class="t-s" text-anchor="middle">topics, doc, focus</text>
+        <text x="780" y="112" class="t-s" text-anchor="middle">silent unless ⚙ says so</text>
+      </g>
+      <text x="430" y="160" class="t-s" text-anchor="middle">a cached plan is thrown away if the assignment's links changed since it was made (linksSig)</text>
+      <text x="430" y="182" class="t-s" text-anchor="middle">step 5 is guaranteed by FA.resolveOpens({allLinks: true}) — the plan can add tabs, never remove the assignment's own</text>
+    </svg>
+    <figcaption>Steps 1 to 5 need no model at all. Only step 6 may call the bridge, and it runs after the work view is already on screen.</figcaption>
+  </figure>
+</section>
+
+<section id="coach">
+  <h2>5 · A coach call, end to end</h2>
+  <p>Every smart feature is the same shape: the panel builds a small JSON payload, the client in <code>lib/ai.js</code> posts it to the bridge, the bridge decides who you are and builds the prompt, one model call happens, and the reply is validated before the panel trusts it.</p>
+  <figure>
+    <svg viewBox="0 0 860 340" role="img" aria-label="Pipeline of a coach call: panel payload, ai.js client, bridge checks (origin, access code, body size, role, images), prompt builder with the length cap, engine, JSON parse with required keys, back to the panel, with the simple-mode fallback branch.">
+      <defs>
+        <marker id="ar5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker>
+        <marker id="ar5a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--amber)"/></marker>
+      </defs>
+      <!-- row 1: panel -> client -> bridge -->
+      <rect x="14" y="30" width="150" height="70" rx="8" class="box-indigo"/>
+      <text x="89" y="52" class="t-b" text-anchor="middle">panel</text>
+      <text x="89" y="70" class="t-s" text-anchor="middle">e.g. sendWork()</text>
+      <text x="89" y="86" class="t-s" text-anchor="middle">thread + files + steps</text>
+      <line x1="164" y1="65" x2="196" y2="65" class="ln" marker-end="url(#ar5)"/>
+      <rect x="198" y="30" width="150" height="70" rx="8" class="box"/>
+      <text x="273" y="52" class="t-b" text-anchor="middle">lib/ai.js client</text>
+      <text x="273" y="70" class="t-s" text-anchor="middle">slim() the assignment,</text>
+      <text x="273" y="86" class="t-s" text-anchor="middle">cap text, add timeout</text>
+      <line x1="348" y1="65" x2="380" y2="65" class="ln-a" marker-end="url(#ar5a)"/>
+      <text x="364" y="55" class="t-a" text-anchor="middle">POST</text>
+      <rect x="382" y="16" width="464" height="98" rx="8" class="box-amber"/>
+      <text x="396" y="38" class="t-b">bridge: the gate, before any prompt exists</text>
+      <text x="396" y="58" class="t">origin must be chrome-extension:// · access code (or open loopback = you)</text>
+      <text x="396" y="76" class="t">Content-Length honest and ≤ 6 MB · JSON object with a registered method</text>
+      <text x="396" y="94" class="t">role: student → devMode off, mode=tutor, no voice · dev-only methods 403 · images validated</text>
+      <!-- row 2: builder -> engine -> parse -->
+      <line x1="614" y1="114" x2="614" y2="140" class="ln-a" marker-end="url(#ar5a)"/>
+      <rect x="382" y="142" width="220" height="86" rx="8" class="box-amber"/>
+      <text x="492" y="164" class="t-b" text-anchor="middle">prompt builder</text>
+      <text x="492" y="182" class="t-s" text-anchor="middle">BUILDERS[method](payload)</text>
+      <text x="492" y="198" class="t-s" text-anchor="middle">system = COACH_IDENTITY + policy</text>
+      <text x="492" y="214" class="t-s" text-anchor="middle">chat: LENGTH CAP unless dev writing</text>
+      <line x1="602" y1="185" x2="634" y2="185" class="ln-a" marker-end="url(#ar5a)"/>
+      <rect x="636" y="142" width="210" height="86" rx="8" class="box-amber"/>
+      <text x="741" y="164" class="t-b" text-anchor="middle">one model call</text>
+      <text x="741" y="182" class="t-s" text-anchor="middle">claude-cli: `claude -p` from an empty</text>
+      <text x="741" y="198" class="t-s" text-anchor="middle">dir, no tools, no settings, no hooks</text>
+      <text x="741" y="214" class="t-s" text-anchor="middle">api: messages.create + image blocks</text>
+      <!-- row 3: parse -> back -->
+      <line x1="741" y1="228" x2="741" y2="254" class="ln-a" marker-end="url(#ar5a)"/>
+      <rect x="636" y="256" width="210" height="64" rx="8" class="box"/>
+      <text x="741" y="278" class="t-b" text-anchor="middle">parse + check</text>
+      <text x="741" y="296" class="t-s" text-anchor="middle">JSON out of the reply · required keys</text>
+      <text x="741" y="310" class="t-s" text-anchor="middle">errors → one fixed sentence, never the detail</text>
+      <path d="M636 288 L 300 288 L 300 100" class="ln" marker-end="url(#ar5)"/>
+      <text x="470" y="280" class="t-s" text-anchor="middle">{ok, result} → client re-validates every field (slices, caps, indices)</text>
+      <!-- fallback -->
+      <path d="M89 100 L 89 300 L 195 300" class="ln-d" marker-end="url(#ar5)"/>
+      <rect x="198" y="256" width="150" height="64" rx="8" class="box-soft"/>
+      <text x="273" y="278" class="t-b" text-anchor="middle">simple mode</text>
+      <text x="273" y="296" class="t-s" text-anchor="middle">MockCoach: rules only,</text>
+      <text x="273" y="310" class="t-s" text-anchor="middle">no model, when /health fails</text>
+      <text x="40" y="200" class="t-s">bridge down at</text>
+      <text x="40" y="214" class="t-s">panel boot →</text>
+    </svg>
+    <figcaption>The role decision happens in the bridge, from the connection, before the prompt is built. A student's payload can claim devMode all it wants; the server rewrites it. Simple mode is what you see when the bridge isn't running.</figcaption>
+  </figure>
+  <h3>The methods, grouped by what they cost</h3>
+  <div class="tscroll"><table>
+    <tr><th>group</th><th>methods</th><th>when it runs</th></tr>
+    <tr><td>list &amp; plan</td><td class="m">pick · panicPlan · setup · breakdown · breakdownSteps · splitStep · studyPlan</td><td>on ↻, Smart Start, "tonight I have"</td></tr>
+    <tr><td>chat &amp; reading</td><td class="m">chat · explain · askPassage · summarize · annotateQuestion · precheck</td><td>only when you type or tap</td></tr>
+    <tr><td>eyes</td><td class="m">readScreen · readPhoto · readPage · videoSummary</td><td>📸 📷 👁 🎬, one image or up to 8 frames per call</td></tr>
+    <tr><td>studying</td><td class="m">practiceTest · flashcards</td><td>from your files + highlights</td></tr>
+    <tr><td>developer only</td><td class="m">writeStep · answerAll · editDoc</td><td>403 for any student, before the model</td></tr>
+    <tr><td>reflection</td><td class="m">debrief · autopsy · voiceProfile</td><td>after sittings, weekly</td></tr>
+  </table></div>
+</section>
+
+<section id="images">
+  <h2>6 · Eyes: how an image reaches the model</h2>
+  <p>Four features share one path. What differs is where the pixels come from and which prompt the bridge builds. The annotation rule from the spec is applied server-side, from the assignment's own words.</p>
+  <figure>
+    <svg viewBox="0 0 860 300" role="img" aria-label="Four image sources (screenshot, photo, PDF page, video frames) converge on one client path to the bridge, where the annotation rule picks between a full reading companion and orientation only.">
+      <defs><marker id="ar6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+      <rect x="14" y="20" width="200" height="54" rx="8" class="box"/>
+      <text x="26" y="41" class="t-b">📸 annotate my screen</text>
+      <text x="26" y="60" class="t-s">captureVisibleTab + drag-to-crop</text>
+      <rect x="14" y="86" width="200" height="54" rx="8" class="box"/>
+      <text x="26" y="107" class="t-b">📷 photo of my page</text>
+      <text x="26" y="126" class="t-s">upload · paste · drop → ≤1600px JPEG</text>
+      <rect x="14" y="152" width="200" height="54" rx="8" class="box"/>
+      <text x="26" y="173" class="t-b">👁 PDF page by eye</text>
+      <text x="26" y="192" class="t-s">pdf.js renders pages with &lt;150 chars</text>
+      <rect x="14" y="218" width="200" height="54" rx="8" class="box"/>
+      <text x="26" y="239" class="t-b">🎬 video frames (toggle)</text>
+      <text x="26" y="258" class="t-s">seek ×8 + screenshot, 800px each</text>
+      <line x1="214" y1="47" x2="300" y2="140" class="ln" marker-end="url(#ar6)"/>
+      <line x1="214" y1="113" x2="300" y2="145" class="ln" marker-end="url(#ar6)"/>
+      <line x1="214" y1="179" x2="300" y2="150" class="ln" marker-end="url(#ar6)"/>
+      <line x1="214" y1="245" x2="300" y2="156" class="ln" marker-end="url(#ar6)"/>
+      <rect x="302" y="112" width="180" height="70" rx="8" class="box-indigo"/>
+      <text x="392" y="136" class="t-b" text-anchor="middle">data URL(s) in the payload</text>
+      <text x="392" y="154" class="t-s" text-anchor="middle">imageDataUrl / imageDataUrls[≤8]</text>
+      <text x="392" y="170" class="t-s" text-anchor="middle">never stored; a 360px thumb in the thread</text>
+      <line x1="482" y1="147" x2="520" y2="147" class="ln" marker-end="url(#ar6)"/>
+      <rect x="522" y="98" width="324" height="98" rx="8" class="box-amber"/>
+      <text x="536" y="120" class="t-b">bridge: the annotation rule (spec §10)</text>
+      <text x="536" y="140" class="t">is annotating / note-taking THE graded work? (regex on title+instructions)</text>
+      <text x="536" y="160" class="t-i">no → summary · key ideas · quotes with a why · questions</text>
+      <text x="536" y="178" class="t-r">yes → what it is · why not · what to look for · questions only</text>
+      <text x="684" y="216" class="t-s" text-anchor="middle">developer role always gets the full version · a typed question → an answer instead</text>
+      <text x="684" y="238" class="t-s" text-anchor="middle">every mode also returns a transcription → joins the assignment's files</text>
+      <text x="684" y="256" class="t-s" text-anchor="middle">so practice tests, flashcards and summaries can use the page later</text>
+      <text x="684" y="284" class="t-s" text-anchor="middle">claude-cli engine: image saved to a temp file, model reads it with Read, file deleted</text>
+    </svg>
+    <figcaption>Pixels move once, as base64 inside the JSON. The bridge decides what kind of help is allowed; the panel only renders what comes back.</figcaption>
+  </figure>
+</section>
+
+<section id="clock">
+  <h2>7 · The clock: one session, two keepers</h2>
+  <p>The running sitting lives in <code>chrome.storage.local</code> as <code>activeSession</code>. The panel draws it while open; the worker guards it while the panel is closed. Both read the same record, and that is where the timer race came from.</p>
+  <figure>
+    <svg viewBox="0 0 860 280" role="img" aria-label="The activeSession record in storage, with the panel's one-second tick on the left and the worker's alarms on the right, both reading and writing it; the fields each side owns are listed.">
+      <defs><marker id="ar7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+      <rect x="300" y="30" width="260" height="220" rx="10" class="box-indigo"/>
+      <text x="430" y="54" class="t-b" text-anchor="middle">activeSession (storage)</text>
+      <text x="316" y="80" class="t-m">assignmentId · startedAt</text>
+      <text x="316" y="98" class="t-m">plannedMin · chunkMin</text>
+      <text x="316" y="116" class="t-m">tabs[] · allowedHosts[]</text>
+      <text x="316" y="134" class="t-m">mode: screen | paper</text>
+      <text x="316" y="152" class="t-m">lastActiveAt · idleAskAt</text>
+      <text x="316" y="170" class="t-m">timeUpAt · checkpointFor</text>
+      <text x="316" y="188" class="t-m">distractions · activityCount</text>
+      <text x="430" y="226" class="t-s" text-anchor="middle">one record, one truth</text>
+      <!-- panel -->
+      <rect x="14" y="60" width="230" height="160" rx="8" class="box"/>
+      <text x="129" y="84" class="t-b" text-anchor="middle">panel (while open)</text>
+      <text x="26" y="106" class="t">restoreClock() → one 1 s tick</text>
+      <text x="26" y="124" class="t-s">ring + mm:ss + "N min left"</text>
+      <text x="26" y="142" class="t-s">at planned end: chime, +5/+10/done/stop</text>
+      <text x="26" y="160" class="t-s">card, 45 s to answer, else stop</text>
+      <text x="26" y="184" class="t-i">generation counter: an older</text>
+      <text x="26" y="200" class="t-i">restoreClock stops itself (v0.8.20)</text>
+      <line x1="244" y1="140" x2="298" y2="140" class="ln" marker-end="url(#ar7)" marker-start="url(#ar7)"/>
+      <!-- worker -->
+      <rect x="616" y="60" width="230" height="160" rx="8" class="box"/>
+      <text x="731" y="84" class="t-b" text-anchor="middle">worker (always)</text>
+      <text x="628" y="106" class="t">one alarm at startedAt + plannedMin</text>
+      <text x="628" y="124" class="t-s">→ notification + chime if the panel is shut</text>
+      <text x="628" y="142" class="t">idle watchdog, every minute</text>
+      <text x="628" y="160" class="t-s">chrome.idle 60 s · tab events · doc edits ·</text>
+      <text x="628" y="176" class="t-s">any audible tab = working (v0.8.20)</text>
+      <text x="628" y="194" class="t-s">10 min quiet → "still there?" · 5 more → stop</text>
+      <text x="628" y="212" class="t-s">drift nudge: distractor host, not in allowedHosts</text>
+      <line x1="562" y1="140" x2="614" y2="140" class="ln" marker-end="url(#ar7)" marker-start="url(#ar7)"/>
+      <text x="430" y="270" class="t-s" text-anchor="middle">storage.onChanged tells the panel when the worker flips idleAskAt / timeUpAt, so the ring reacts within a second</text>
+    </svg>
+    <figcaption>Hard stop means hard stop: whichever side reaches the planned end first sets timeUpAt and plays the chime once. The record is the handshake.</figcaption>
+  </figure>
+</section>
+
+<section id="storage">
+  <h2>8 · What's stored where</h2>
+  <p>Everything is on your machine. The only thing that leaves it is the JSON a coach call sends to the bridge, and the bridge is also your machine until it's hosted.</p>
+  <div class="tscroll"><table>
+    <tr><th>where</th><th>what</th><th>notes</th></tr>
+    <tr><td class="m">chrome.storage.local</td><td>assignmentsCache · snapshot (classes, grades, schedule, topics) · assignmentMeta (steps, thread, files, setupPlan, tests) · sessions · activeSession · settings · highlights (fa-hl:*)</td><td>survives reloads; finished work pruned after 30 days; quota errors surfaced</td></tr>
+    <tr><td class="m">~/.focus-agent/</td><td>bridge.log · cwd/ (empty dir the CLI engine runs from) · api_key (not yet)</td><td>the bridge's only files</td></tr>
+    <tr><td class="m">the model</td><td>per call: slim assignment, description ≤ 3k, file text ≤ 14k each, last 20 messages, grades as numbers</td><td>never names, ids, emails, teacher emails, raw portal objects</td></tr>
+    <tr><td class="m">never</td><td>your password · cookies · full screenshots · video or audio</td><td>cookies stay in the myPoly tab; images are a temp file for the CLI engine, deleted after the call</td></tr>
+  </table></div>
+</section>
+
+<section id="gates">
+  <h2>9 · The test gates</h2>
+  <p>Four suites run before every commit, and one boot test that clicks through the panel in a fake browser.</p>
+  <div class="grid2">
+    <div class="card"><h4>security_tests.py <span class="pill green">89/89</span></h4><p>Starts the bridge with a mock engine that reports what it would have sent. Proves origins, codes, roles, framing attacks, image validation, and every prompt rule: length cap, annotation rule, orientation only.</p><span class="m">python3 scripts/security_tests.py</span></div>
+    <div class="card"><h4>test-panel-boundary.js <span class="pill green">28/28</span></h4><p>Runs the real panel functions in a VM: developer controls only on a positive, current dev answer bound to the exact server and code.</p><span class="m">node scripts/test-panel-boundary.js</span></div>
+    <div class="card"><h4>test-background.js <span class="pill green">14/14</span> · test-docops.js <span class="pill green">17/17</span></h4><p>Worker alarms and session end paths; the Google Docs edit ops (MLA format, replace, insert) with their index math.</p><span class="m">npm test runs all four</span></div>
+    <div class="card"><h4>smoke-panel.js <span class="pill amber">6 known failures</span></h4><p>Boots the panel in jsdom with the fixture feed: list order, missing section, Smart Start opening links, folded replies. The six failures predate this week and are about the chunk checkpoint and dev toggle in jsdom.</p><span class="m">node scripts/smoke-panel.js</span></div>
+  </div>
+  <p class="why">What the gates can't see: a real scanned PDF, a real YouTube tab, the frames pass, the timer race, and whether the model actually respects the length cap. Those are your reload-and-try list.</p>
+</section>
+
+<div class="foot">Generated from the code at v0.8.21 on 2026-09-17. Source of truth for behaviour is <span class="m">docs/SPEC.md</span>; for state, <span class="m">docs/STATUS.md</span>. The older <span class="m">docs/how-it-works.html</span> describes v0.6 and is kept for the JavaScript glossary only.</div>
+</div>
