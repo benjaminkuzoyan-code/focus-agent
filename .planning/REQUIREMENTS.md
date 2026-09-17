@@ -77,30 +77,30 @@ Which phases cover which requirements. Filled in during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| AUTH-01 | TBD | Pending |
-| AUTH-02 | TBD | Pending |
-| AUTH-03 | TBD | Pending |
-| PORTAL-01 | TBD | Pending |
-| PORTAL-02 | TBD | Pending |
-| PORTAL-03 | TBD | Pending |
-| PORTAL-04 | TBD | Pending |
-| PORTAL-05 | TBD | Pending |
-| CLOCK-01 | TBD | Pending |
-| CLOCK-02 | TBD | Pending |
-| COACH-01 | TBD | Pending |
-| COACH-02 | TBD | Pending |
-| COACH-03 | TBD | Pending |
-| DONE-01 | TBD | Pending |
-| INFRA-01 | TBD | Pending |
-| INFRA-02 | TBD | Pending |
-| QA-01 | TBD | Pending |
-| QA-02 | TBD | Pending |
+| AUTH-01 | Phase 1 | Pending |
+| AUTH-02 | Phase 1 | Pending |
+| AUTH-03 | Phase 1 | Pending |
+| PORTAL-01 | Phase 2 | Pending |
+| PORTAL-02 | Phase 2 | Pending |
+| PORTAL-03 | Phase 2 | Pending |
+| PORTAL-04 | Phase 4 | Pending |
+| PORTAL-05 | Phase 4 | Pending |
+| CLOCK-01 | Phase 3 | Pending |
+| CLOCK-02 | Phase 3 | Pending |
+| COACH-01 | Phase 3 | Pending |
+| COACH-02 | Phase 3 | Pending |
+| COACH-03 | Phase 3 | Pending |
+| DONE-01 | Phase 3 | Pending |
+| INFRA-01 | Phase 5 | Pending |
+| INFRA-02 | Phase 5 | Pending |
+| QA-01 | Phase 5 | Pending |
+| QA-02 | Phase 5 | Pending |
 
 **Coverage:**
 - v1 requirements: 18 total
-- Mapped to phases: 0 (pending roadmap creation)
-- Unmapped: 18 ⚠️ (expected until roadmap step runs)
+- Mapped to phases: 18 ✓
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-09-17*
-*Last updated: 2026-09-17 after initial definition*
+*Last updated: 2026-09-17 after roadmap creation (ROADMAP.md)*
