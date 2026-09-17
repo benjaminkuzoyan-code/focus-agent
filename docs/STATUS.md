@@ -1,6 +1,6 @@
 # STATUS — rewritten by Claude Code at the end of every session
 
-**Updated:** 2026-09-16 · **Version:** 0.8.21 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (private, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
+**Updated:** 2026-09-16 · **Version:** 0.8.21 (manifest) · **Remote:** https://github.com/benjaminkuzoyan-code/focus-agent (**public** since 2026-09-17, `main`; every session ends with a push) · **HEAD:** see `git log -1` · **Working tree:** clean after this session's commit.
 
 ## 2026-09-16: chat replies too big (v0.8.21) — spec §7
 
