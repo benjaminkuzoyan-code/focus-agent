@@ -36,20 +36,24 @@ One tap (Smart Start) gets a student from "can't start" to "working, with struct
 
 ### Active
 
-<!-- From docs/SPEC.md §23 "Known gaps", in Ben's stated priority order. Each is a hypothesis until shipped and validated with real friends/schools. -->
+<!-- Reprioritized 2026-09-17: current milestone goal is "get pilot friends actually testing it," Blackbaud-only. Items marked 🎯 PILOT are what's in scope now; everything else is real, roadmapped work that's deliberately on hold until after the first pilot wave. -->
 
-- [ ] Google OAuth actually works on a friend's school-managed account (personal-Gmail fallback door, stable extension ID via manifest `key`, Google OAuth clients updated to match)
+**🎯 Pilot-critical (in progress now):**
+- [ ] Google OAuth actually works on a friend's own install: stable extension ID via manifest `key`, both Google OAuth clients (Chrome-Extension type + Web-application type) re-pointed to it, personal-Gmail fallback door confirmed working end to end. Confirmed broken today — see Key Decisions.
+- [ ] Coach server reachable for real: real Anthropic API key wired in, running on Ben's Mac mini, exposed via Cloudflare Tunnel, one access code minted per friend.
+- [ ] Core pilot loop verified live on Blackbaud with a real friend account: portal read → ranked list → Smart Start → focus clock → coach chat, end to end, not just unit-tested.
+
+**⏸ Deferred until after the first pilot wave (still real, still roadmapped):**
 - [ ] Work/break cadence: app-enforced 15-minute-work / 5-minute-break cycle the student can't skip or extend
 - [ ] One-bubble coach: replace the current chip row with a single next-best-action bubble that advances as work progresses
-- [ ] Text highlighter's ≡ summarize respects the assignment-aware annotation rule (currently always on, unlike 📸/📷 which already obey it)
+- [ ] Text highlighter's ≡ summarize respects the assignment-aware annotation rule (currently always on, unlike 📸/📷 which already obey it) — plus the 📸 button's text-overflow bug found 2026-09-17 (see Context)
 - [ ] Checklist is genuinely built *after* resources are opened and instructions are read, not from assignment-type rules
-- [ ] Google Classroom grades, materials, and schedule (needs Classroom API + school allow-listing for under-18 accounts)
+- [ ] Google Classroom grades, materials, and schedule (needs Classroom API + school allow-listing for under-18 accounts) — **on hold: pilot is Blackbaud-only for now**
 - [ ] A real "finish" moment when an assignment is done (streak, full-screen beat, a line that lands) — design pending first-tester feedback
-- [ ] Aeries adapter (not built — plan: DevTools session on a friend's Student Portal login)
-- [ ] Canvas grades/schedule (assignments/quizzes exist but never run on a real account); Google Classroom never run on a real account either
+- [ ] Aeries adapter (not built — plan: DevTools session on a friend's Student Portal login) — **on hold: pilot is Blackbaud-only for now**
+- [ ] Canvas grades/schedule (assignments/quizzes exist but never run on a real account) — **on hold: pilot is Blackbaud-only for now**
 - [ ] Adapter fixtures and a `lib/priority.js` ranking unit test (current test gap)
-- [ ] Real-extension verification pass: chime, 45s stop, mid-sitting reload, 📸/📷 capture, a real scanned PDF, a real YouTube tab (captions + frames), the missing/overdue section on a real feed, attached links opening, fresh-profile install, Google on a second machine
-- [ ] Hosted coach server deployed off Ben's Mac with a real API key; always-on vs. auto-stop policy decided
+- [ ] Full real-extension verification pass beyond the pilot-critical smoke test: 📸/📷 capture, a real scanned PDF, a real YouTube tab (captions + frames), attached links opening, fresh-profile install, Google on a second machine
 - [ ] Accessibility pass (labels, focus rings, live regions) before any store listing
 
 ### Out of Scope
@@ -60,12 +64,17 @@ One tap (Smart Start) gets a student from "can't start" to "working, with struct
 
 ## Context
 
-- Chrome side-panel extension + a small Python (stdlib `http.server`) coach server (`bridge/coach_server.py`) that holds the AI key and never stores requests. Deploy scaffolding for Fly.io already exists in `deploy/` (Dockerfile, `fly.toml`, systemd unit, README) — it's just never been deployed or given a real API key.
-- Per-portal adapters are reverse-engineered, student-session-only API clients normalized into one assignment shape (`adapters/schema.js`); Blackbaud/myPoly is the only fully-proven one.
-- Pilot audience: Ben plus 4–5 friends he onboards in person, spanning Blackbaud (Poly), Canvas, Google Classroom, and Aeries schools.
+- Chrome side-panel extension + a small Python (stdlib `http.server`) coach server (`bridge/coach_server.py`) that holds the AI key and never stores requests. Deploy scaffolding for Fly.io already exists in `deploy/` (Dockerfile, `fly.toml`, systemd unit, README) — **superseded for the pilot** by the Mac-mini + Cloudflare Tunnel plan (see Key Decisions); the Fly.io path may still be worth revisiting once the pilot outgrows one machine.
+- Per-portal adapters are reverse-engineered, student-session-only API clients normalized into one assignment shape (`adapters/schema.js`); Blackbaud/myPoly is the only fully-proven one. **Pilot v1 assumes Blackbaud only** — Canvas/Classroom/Aeries friends wait for a later wave.
+- Pilot audience: Ben plus 4–5 friends he onboards in person. First wave is Blackbaud (Poly) only; Canvas/Classroom/Aeries friends are a later wave once those adapters are ready.
 - `docs/SPEC.md` is the source of truth for product behavior — reviewed by Ben by voice on 2026-09-13, with his direction marked 🎯 (decided) or 💬 (to discuss) inline. Code and tests are built to match it; this PROJECT.md and the roadmap should stay traceable back to it.
 - Status legend carried over from the spec: ✅ proven by an automated test, 👁 checked by hand in the browser harness, ⚠️ implemented but never run for real, ❌ not built.
 - Known unresolved product question (§5/§14): negotiate vs. block distracting sites during a work session — not yet decided.
+
+**Known issues found during Phase 1 planning (2026-09-17), not yet fixed:**
+- 📸 screen-annotate button ([sidepanel/panel.js:1985-1987](sidepanel/panel.js:1985)): tapping it with no assignment open sets the small pill-shaped button's text to the full sentence "open an assignment first" — the button has no max-width/no-wrap ([sidepanel/panel.css:76-79](sidepanel/panel.css:76)), so it visibly overflows the narrow side-panel header. Cheap CSS/JS fix, deferred until after the pilot push.
+- 🖍 crayon toolbar's ≡ summarize doesn't apply the graded-annotation rule the way 📸/📷 already do (this is requirement COACH-02, now deferred — see Requirements).
+- Unconfirmed, needs live testing: the crayon toolbar's auto-registration for a newly-permitted site (`syncToolbarScript` in `background.js`) isn't awaited before Smart Start opens that site's tab, so the toolbar may not appear on the very first visit to a new site even though the coach's own tip message says it will be there.
 
 ## Constraints
 
@@ -85,6 +94,9 @@ One tap (Smart Start) gets a student from "can't start" to "working, with struct
 | Whole school year is read, finished work folded (not hidden) at the bottom | Nothing the student can see in the portal should be invisible in the app | ✓ Good — live v0.8.19 |
 | Per-assignment annotation rule: no annotate/summarize help when the annotation itself is the graded work | Keeps the tutor-not-ghostwriter rule intact for reading assignments | ✓ Good — built v0.8.17 for 📸/📷; text highlighter still needs it |
 | "Legal everywhere, with schools too" cuts any non-compliant feature outright | Protects pilot students from school action; non-negotiable per Ben | — Pending (governs all future scope decisions) |
+| Milestone reprioritized around "get pilot friends testing," Blackbaud-only for now | Ben's stated near-term goal; Canvas/Classroom/Aeries and Phase 3 UX polish (cadence, one-bubble coach, finish moment) don't block a first pilot wave | — Pending (decided 2026-09-17) |
+| Google OAuth fix (manifest `key` + re-pointing both OAuth clients) moved up to blocking priority | Confirmed during Phase 1 planning that neither OAuth door works for a friend's own install today — every friend gets a different Chrome extension ID, which neither registered OAuth client recognizes | — Pending (decided 2026-09-17, in progress) |
+| Coach server hosts on Ben's Mac mini behind a Cloudflare Tunnel with a real Anthropic API key, not Fly.io | Ben already has always-on hardware; Cloudflare Tunnel avoids port-forwarding/static-IP setup and needs no app install on friends' machines (unlike Tailscale). `bridge/coach_server.py` already supports this via `FA_HOST=0.0.0.0` + `ANTHROPIC_API_KEY`/`~/.focus-agent/api_key` + `FA_TOKENS`/minted per-friend codes | — Pending (decided 2026-09-17, in progress) |
 
 ## Evolution
 
@@ -104,4 +116,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-17 after initialization*
+*Last updated: 2026-09-17 after reprioritizing around pilot-readiness (Blackbaud-only, OAuth fix + Mac-mini coach hosting)*

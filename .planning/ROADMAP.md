@@ -2,7 +2,7 @@
 
 ## Overview
 
-Focus Agent is a working v0.8.21 Chrome extension, validated end-to-end on one user (Blackbaud/myPoly). This milestone closes the 18 named "Active" gaps in PROJECT.md so it can survive contact with 4-5 real friends across Blackbaud, Canvas, Google Classroom, and Aeries schools. The path: unblock everything Google-dependent with a stable extension ID and hardened OAuth, extend the already-proven adapter contract to Canvas grades/schedule and Google Classroom, extend the already-tested clock state machine with enforced cadence plus a one-bubble coach plus a real finish moment, reverse-engineer and fixture-test a fourth adapter (Aeries), and finally get the coach server off Ben's laptop with a real API key and a full real-device verification pass. No new frameworks, no new product surfaces beyond what's already named in the spec — this is closing gaps in a system that already works, in dependency order.
+Focus Agent is a working v0.8.21 Chrome extension, validated end-to-end on one user (Blackbaud/myPoly). The original milestone plan closed 18 "Active" gaps in PROJECT.md across Blackbaud, Canvas, Google Classroom, and Aeries. **Reprioritized 2026-09-17**: the immediate goal is narrower — get pilot friends actually testing the app, Blackbaud-only. That means Phase 1 (OAuth) and a new Phase 1.5 (Mac-mini coach hosting + a live smoke test) are the active work; Phases 2-5 below are real, still-roadmapped work put on hold until after the first pilot wave, not cancelled. See `.planning/PROJECT.md` Key Decisions and `.planning/REQUIREMENTS.md` for the full reasoning and the v1→v2 requirement moves.
 
 ## Phases
 
@@ -10,13 +10,14 @@ Focus Agent is a working v0.8.21 Chrome extension, validated end-to-end on one u
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-Decimal phases appear between their surrounding integers in numeric order.
+Decimal phases appear between their surrounding integers in numeric order. Phase 1.5 below is an insertion driven by the 2026-09-17 reprioritization, not an emergency fix — the INSERTED convention still applies to keep the numbering scheme consistent.
 
-- [ ] **Phase 1: Stable Extension ID + OAuth Hardening** - A pilot friend on a school-managed Chrome account can sign in with Google reliably, and that access keeps working across reloads and over time
-- [ ] **Phase 2: Canvas + Google Classroom Read Access** - Canvas and Google Classroom students see the same grades/schedule picture Blackbaud students already get
-- [ ] **Phase 3: Enforced Cadence + One-Bubble Coach + Finish Moment** - Work sessions have an unskippable work/break rhythm, one clear coach suggestion at a time, an honestly-built checklist, and a true finish moment
-- [ ] **Phase 4: Aeries Adapter + Fixture Tests** - An Aeries student gets full portal support, and every adapter is protected by a fixture test that catches shape-drift before it ships
-- [ ] **Phase 5: Hosted Coach Server + Real-Device QA** - The coach server runs for real friends off Ben's laptop, its daily-cap behavior is a deliberate decision, and the whole extension has been run for real and checked for basic accessibility
+- [ ] **Phase 1: Stable Extension ID + OAuth Hardening** - 🎯 ACTIVE - A pilot friend on a school-managed Chrome account can sign in with Google reliably, and that access keeps working across reloads and over time
+- [ ] **Phase 1.5: Mac Mini Coach Hosting + Pilot Smoke Test** - 🎯 ACTIVE - INSERTED 2026-09-17 - The coach server runs for real off Ben's Mac mini, and the core Blackbaud pilot loop has been verified live with a real friend account
+- [ ] **Phase 2: Canvas + Google Classroom Read Access** - ⏸ DEFERRED until after first pilot wave - Canvas and Google Classroom students see the same grades/schedule picture Blackbaud students already get
+- [ ] **Phase 3: Enforced Cadence + One-Bubble Coach + Finish Moment** - ⏸ DEFERRED until after first pilot wave - Work sessions have an unskippable work/break rhythm, one clear coach suggestion at a time, an honestly-built checklist, and a true finish moment
+- [ ] **Phase 4: Aeries Adapter + Fixture Tests** - ⏸ DEFERRED until after first pilot wave - An Aeries student gets full portal support, and every adapter is protected by a fixture test that catches shape-drift before it ships
+- [ ] **Phase 5: Full Real-Device QA + Accessibility** - ⏸ DEFERRED until after first pilot wave - The hosted-server piece of the original Phase 5 moved to Phase 1.5; what's left here is the rest of the real-device pass and accessibility, checked before any store listing
 
 ## Phase Details
 
@@ -34,7 +35,25 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 - [ ] 01-01: TBD
 
-### Phase 2: Canvas + Google Classroom Read Access
+### Phase 1.5: Mac Mini Coach Hosting + Pilot Smoke Test
+**INSERTED 2026-09-17** — reprioritization driven by "get pilot friends actually testing it," decided with Ben during Phase 1 planning.
+**Goal**: The coach server runs for real off Ben's Mac mini (not his dev laptop, not the mock/simple-mode fallback), and the core Blackbaud pilot loop has been verified live end to end with a real friend account.
+**Mode:** mvp
+**Depends on**: Phase 1 conceptually helps (friends need to be able to connect at all) but is not a hard technical dependency for this phase's own requirements — INFRA-01/02 and PILOT-01 don't touch OAuth. Sequenced right after Phase 1 because both are pilot-blocking.
+**Requirements**: INFRA-01, INFRA-02, PILOT-01
+**Architecture decided (not Fly.io):** Mac mini, `FA_HOST=0.0.0.0`, real key at `ANTHROPIC_API_KEY` or `~/.focus-agent/api_key`, exposed via a Cloudflare Tunnel (no port-forwarding, no static IP, no app install needed on friends' machines), one access code minted per friend (`FA_TOKENS` / the `token` CLI helper baked into `bridge/coach_server.py`). The existing `deploy/` Fly.io scaffolding is superseded for this milestone, not deleted.
+**Success Criteria** (what must be TRUE):
+  1. `bridge/coach_server.py` is running on the Mac mini with a real Anthropic API key configured (not the mock engine, not headless `claude -p`).
+  2. The server is reachable from outside Ben's home network via a Cloudflare Tunnel URL, and refuses to start without both the API key and at least one access code configured (its own built-in guardrails).
+  3. Each pilot friend has their own minted access code with its own daily call cap.
+  4. The per-code daily-cap-across-restart behavior is a documented, deliberate choice (e.g., "resets on Mac mini restart, and that's accepted for pilot scale" or a persistence fix), not an unexamined default.
+  5. A real friend account on Blackbaud completes the full core loop live: portal read → ranked list with the friend's real assignments → Smart Start → focus clock runs and enforces its planned-end behavior → coach chat gives a real (non-simple-mode) reply scoped to a real assignment.
+**Plans**: TBD
+
+Plans:
+- [ ] 01.5-01: TBD
+
+### Phase 2: Canvas + Google Classroom Read Access — ⏸ DEFERRED until after first pilot wave
 **Goal**: Canvas and Google Classroom students see grades, schedule, and materials the way a Blackbaud student already does.
 **Mode:** mvp
 **Depends on**: Phase 1 (Classroom access needs the stable OAuth foundation; Canvas grades need no new auth and could start in parallel)
@@ -48,7 +67,7 @@ Plans:
 Plans:
 - [ ] 02-01: TBD
 
-### Phase 3: Enforced Cadence + One-Bubble Coach + Finish Moment
+### Phase 3: Enforced Cadence + One-Bubble Coach + Finish Moment — ⏸ DEFERRED until after first pilot wave
 **Goal**: A work session has a work/break rhythm the student can't talk their way out of, one clear next action from the coach at a time, a checklist that reflects real engagement, and a genuine finish moment.
 **Mode:** mvp
 **Depends on**: Nothing directly — technically decoupled from Phases 1-2 (different files: session/clock state and side-panel UI vs. adapters/OAuth); sequenced third per priority, not a technical dependency
@@ -65,7 +84,7 @@ Plans:
 Plans:
 - [ ] 03-01: TBD
 
-### Phase 4: Aeries Adapter + Fixture Tests
+### Phase 4: Aeries Adapter + Fixture Tests — ⏸ DEFERRED until after first pilot wave
 **Goal**: An Aeries student gets full portal support, and every portal adapter is protected by a fixture test that would catch a silent shape/status-code drift before it ships.
 **Mode:** mvp
 **Depends on**: Phase 2 (fixture tests must cover the Canvas and Classroom adapters built there, in addition to the new Aeries adapter and the existing Blackbaud one)
@@ -79,16 +98,14 @@ Plans:
 Plans:
 - [ ] 04-01: TBD
 
-### Phase 5: Hosted Coach Server + Real-Device QA
-**Goal**: The coach server runs reliably for real friends off Ben's laptop, its daily-cap behavior under restarts is a deliberate decision, and the extension's core behaviors and basic accessibility have been verified for real before any store listing.
+### Phase 5: Full Real-Device QA + Accessibility — ⏸ DEFERRED until after first pilot wave
+**Goal**: Beyond Phase 1.5's core-loop smoke test, the rest of the extension's real-device behaviors and basic accessibility have been verified before any store listing.
 **Mode:** mvp
-**Depends on**: Phases 1-4 (gated last so the real-device pass and hosted server cover every new surface added earlier in the milestone)
-**Requirements**: INFRA-01, INFRA-02, QA-01, QA-02
+**Depends on**: Phases 1-4 (gated last so the real-device pass covers every new surface added earlier in the milestone). Note: the hosted-coach-server requirements (INFRA-01, INFRA-02) that originally lived here moved to Phase 1.5 during the 2026-09-17 reprioritization — this phase now covers only QA-01-FULL and QA-02.
+**Requirements**: QA-01-FULL, QA-02
 **Success Criteria** (what must be TRUE):
-  1. The coach server is reachable by pilot friends from a real hosted deployment, off Ben's own Mac, using a real API key.
-  2. The per-code daily call cap either survives the host's normal restart/scale-to-zero behavior, or that reset behavior is an explicit, documented, accepted decision rather than an accident.
-  3. Each core real-extension behavior (chime, 45s stop, mid-sitting reload, screenshot/photo capture, a real scanned PDF, a real YouTube tab with captions and frames, the missing/overdue section on a live feed, attached links opening, fresh-profile install, Google sign-in on a second machine) has been run for real at least once.
-  4. The extension has basic accessibility coverage — labels, focus rings, live regions — verified before any store listing.
+  1. Each remaining real-extension behavior (chime, 45s stop, mid-sitting reload, screenshot/photo capture, a real scanned PDF, a real YouTube tab with captions and frames, attached links opening, fresh-profile install, Google sign-in on a second machine) has been run for real at least once.
+  2. The extension has basic accessibility coverage — labels, focus rings, live regions — verified before any store listing.
 **Plans**: TBD
 
 Plans:
@@ -96,13 +113,14 @@ Plans:
 
 ## Progress
 
-**Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
+**Execution Order (reprioritized 2026-09-17):**
+Active now: 1 → 1.5. Everything after is deferred until after the first pilot wave, then resumes in order: 2 → 3 → 4 → 5.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Stable Extension ID + OAuth Hardening | 0/TBD | Not started | - |
-| 2. Canvas + Google Classroom Read Access | 0/TBD | Not started | - |
-| 3. Enforced Cadence + One-Bubble Coach + Finish Moment | 0/TBD | Not started | - |
-| 4. Aeries Adapter + Fixture Tests | 0/TBD | Not started | - |
-| 5. Hosted Coach Server + Real-Device QA | 0/TBD | Not started | - |
+| 1. Stable Extension ID + OAuth Hardening | 0/TBD | 🎯 Active (context gathered, planning next) | - |
+| 1.5. Mac Mini Coach Hosting + Pilot Smoke Test | 0/TBD | 🎯 Active (not yet planned) | - |
+| 2. Canvas + Google Classroom Read Access | 0/TBD | ⏸ Deferred | - |
+| 3. Enforced Cadence + One-Bubble Coach + Finish Moment | 0/TBD | ⏸ Deferred | - |
+| 4. Aeries Adapter + Fixture Tests | 0/TBD | ⏸ Deferred | - |
+| 5. Full Real-Device QA + Accessibility | 0/TBD | ⏸ Deferred | - |
