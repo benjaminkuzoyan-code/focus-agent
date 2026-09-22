@@ -18,6 +18,7 @@
 let assignments = [];   // normalized, from the portal tab or the cache
 let lastDiag = "";      // why the last portal read failed; shown inside the first-run card's details
 let ranked = [];        // assignments + estMin + urgency, sorted
+let finishedOpen = false; // "finished this year" stays open across re-renders once opened
 let sourceNotice = "";  // why we're NOT showing live portal data ("" when live)
 let snapshot = null;    // full Student Snapshot (classes, grades, schedule)
 let settings = {};      // cached FA.store.getSettings()
@@ -461,26 +462,54 @@ function renderList(meta = {}) {
  * see the whole year; only what's pending competes for attention.
  */
 function renderFinished(list, meta = {}) {
+  const inPortal = new Set(assignments.map((a) => a.id));
+  // Worked on here but gone from the portal: rebuilt from the snapshot enterWork saved.
+  const vanished = Object.entries(meta)
+    .filter(([id, m]) => !inPortal.has(id) && m?.snap && (m.thread?.length || m.steps?.length || m.files?.length || m.tests?.length || m.done))
+    .map(([id, m]) => ({ id, ...m.snap, gone: true }));
   const done = assignments
     .filter((a) => a.finished || meta?.[a.id]?.done || FA.isStale(a))
+    .concat(vanished)
     .sort((a, b) => (b.dueDate || "").localeCompare(a.dueDate || ""));
   if (!done.length) return;
   const det = document.createElement("details");
   det.className = "finished-section";
+  det.open = finishedOpen;
+  det.addEventListener("toggle", () => { finishedOpen = det.open; });
   const sum = document.createElement("summary");
   sum.textContent = `✓ finished this year (${done.length})`;
   det.appendChild(sum);
   for (const a of done) {
+    const m = meta?.[a.id] || {};
     const row = document.createElement("div");
     row.className = "finished-row";
-    row.innerHTML = `<span class="f-t"></span><span class="f-m"></span>`;
+    row.innerHTML = `<div class="f-main"><span class="f-t"></span><span class="f-m"></span></div><div class="f-acts"></div>`;
     row.querySelector(".f-t").textContent = a.title;
-    const status = a.missing ? "missing" : a.status === 4 ? "graded" : a.finished ? "completed" : meta?.[a.id]?.done ? "done here" : "past due · never ticked complete (comes back on top if the teacher marks it missing)";
-    row.querySelector(".f-m").textContent = `${a.course} · ${a.dueDate ? new Date(a.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "no date"} · ${status}` + (a.points ? ` · ${a.points} pts` : "");
+    const status = a.gone ? "not in the portal anymore" : a.missing ? "missing" : a.status === 4 ? "graded" : a.finished ? "completed" : m.done ? "done here" : "past due · never ticked complete (comes back on top if the teacher marks it missing)";
+    const kept = [m.thread?.length ? `${m.thread.length} msgs` : "", m.steps?.length ? `${m.steps.length} steps` : "", m.files?.length ? `${m.files.length} files` : "", m.tests?.length ? `${m.tests.length} tests` : ""].filter(Boolean).join(", ");
+    row.querySelector(".f-m").textContent = `${a.course || ""} · ${a.dueDate ? new Date(a.dueDate).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "no date"} · ${status}` + (a.points ? ` · ${a.points} pts` : "") + (kept ? ` · ${kept}` : "");
+    // Tap the row → back into the work view, with its thread, steps, files and tests.
+    row.querySelector(".f-main").title = "open it here again";
+    row.querySelector(".f-main").addEventListener("click", () => enterWork({ estMin: 30, ...a }));
+    const acts = row.querySelector(".f-acts");
+    if (m.done) {
+      const back = document.createElement("button");
+      back.className = "f-act";
+      back.textContent = "↩ put back";
+      back.title = "not actually finished -- back to the list";
+      back.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await FA.store.markDone(a.id, false);
+        await refreshAll();
+      });
+      acts.appendChild(back);
+    }
     if (a.url) {
-      row.style.cursor = "pointer";
-      row.title = "open in your portal";
-      row.addEventListener("click", () => openTab(a.url, true));
+      const link = document.createElement("button");
+      link.className = "f-act";
+      link.textContent = "portal ↗";
+      link.addEventListener("click", (e) => { e.stopPropagation(); openTab(a.url, true); });
+      acts.appendChild(link);
     }
     det.appendChild(row);
   }
@@ -867,11 +896,28 @@ async function enterWork(assignment) {
     tests: Array.isArray(m.tests) ? m.tests : [],
     awaitingDraft: false,
   };
+  // Remember the card, so this assignment stays reachable from "finished this
+  // year" even after the portal drops it (past semester, teacher deleted it).
+  const snap = { title: assignment.title, course: assignment.course, dueDate: assignment.dueDate || null, url: assignment.url || null, points: assignment.points ?? null, type: assignment.type || null, estMin: assignment.estMin || null };
+  if (JSON.stringify(m.snap) !== JSON.stringify(snap)) await FA.store.patchAssignmentMeta(assignment.id, { snap });
   renderFiles();
 
   document.body.classList.toggle("studying", assignment.type === "test");
   $("work-title").textContent = assignment.title;
   $("work-meta").textContent = [assignment.course, dueLabel(assignment), assignment.estMin ? `~${assignment.estMin} min` : ""].filter(Boolean).join(" · ");
+  if (m.done) {
+    // Reopened from "finished this year": say so, and offer the way back to the list.
+    const back = document.createElement("button");
+    back.className = "f-act";
+    back.textContent = "✓ finished · put back";
+    back.title = "not actually finished -- back to the list";
+    back.addEventListener("click", async () => {
+      await FA.store.markDone(assignment.id, false);
+      back.remove();
+      await refreshAll();
+    });
+    $("work-meta").append(" · ", back);
+  }
   renderSteps();
   renderThread();
   showView("work");
@@ -3377,9 +3423,8 @@ async function finishWork(done, extra = {}) {
     await FA.store.markDone(a.id);
     await FA.store.addQuestEvent(a, a.estMin);
     await autoLearnVoice(a);
-    // Finished → the chat log for it is over. Steps and files stay for reference.
-    await FA.store.patchAssignmentMeta(a.id, { thread: [] });
-    if (current) current.thread = [];
+    // Thread, steps and files stay: a finished assignment can be reopened from
+    // "finished this year" (storage prunes the heavy parts after 30 days).
   }
   await refreshAll();
   renderDone(a, record, done);

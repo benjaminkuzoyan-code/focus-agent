@@ -212,9 +212,14 @@ select {
 .card.missing { box-shadow: inset 3px 0 0 var(--red), 0 0 18px rgba(251, 113, 133, 0.12); border-color: rgba(251, 113, 133, 0.35); }
 .finished-section { margin: 14px 2px 4px; }
 .finished-section summary { cursor: pointer; font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted); }
-.finished-row { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; margin-top: 4px; border: 1px solid var(--edge); border-radius: var(--r-sm); opacity: 0.75; }
+.finished-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin-top: 4px; border: 1px solid var(--edge); border-radius: var(--r-sm); opacity: 0.8; }
+.finished-row:hover { opacity: 1; }
+.finished-row .f-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; cursor: pointer; }
 .finished-row .f-t { font-size: 12.5px; }
 .finished-row .f-m { font-size: 11px; color: var(--muted); }
+.finished-row .f-acts { display: flex; gap: 4px; flex-shrink: 0; }
+.finished-row .f-act { font-size: 11px; padding: 3px 7px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; }
+.finished-row .f-act:hover { color: var(--fg, inherit); border-color: var(--muted); }
 .badge-behind { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 1px 6px; border-radius: 999px; margin-right: 6px; vertical-align: 1px; color: #fff; background: var(--red); }
 .badge-behind.overdue { background: transparent; color: var(--red); border: 1px solid var(--red); }
 .snap-summary { margin-top: 6px; line-height: 1.45; }

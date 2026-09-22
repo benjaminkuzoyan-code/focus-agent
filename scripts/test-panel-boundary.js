@@ -182,6 +182,48 @@ function makeContext({ health, settings }) {
     check("explicit doc action (format/edit) still adopts the active tab's doc", t2.id === "hist-essay-1" && patches.length === 1, JSON.stringify({ t2, patches }));
   }
 
+  console.log("== finished this year: done and vanished assignments can be reopened ==");
+  {
+    // Real renderFinished with a tiny DOM stand-in; enterWork/refreshAll/openTab/markDone are recorded.
+    const src = fn(panel, "function renderFinished(");
+    const calls = [];
+    const el = () => {
+      const node = { children: [], listeners: {}, style: {}, dataset: {}, set innerHTML(h) { this._html = h; },
+        appendChild(c) { this.children.push(c); return c; }, append(...xs) { this.children.push(...xs); },
+        addEventListener(t, f) { this.listeners[t] = f; }, querySelector(sel) { return (this.q ||= {})[sel] ||= el(); } };
+      return node;
+    };
+    const ctx = vm.createContext({
+      assignments: [{ id: "a-done", title: "Bio lab", course: "Biology", dueDate: "2026-09-18", url: "https://portal/a-done" }, { id: "a-open", title: "Latin vocab", course: "Latin", dueDate: "2026-09-25" }],
+      finishedOpen: false,
+      FA: { isStale: () => false, store: { markDone: async (id, done) => calls.push(["markDone", id, done]) } },
+      document: { createElement: () => el() },
+      enterWork: (a) => calls.push(["enterWork", a.id, a.title]),
+      refreshAll: async () => calls.push(["refreshAll"]),
+      openTab: (u) => calls.push(["openTab", u]),
+    });
+    vm.runInContext(src, ctx);
+    const meta = { "a-done": { done: true, doneAt: 1, thread: [{}, {}], steps: [{}] }, "a-gone": { done: true, snap: { title: "Canal essay", course: "History", dueDate: "2026-09-10" }, thread: [{}] } };
+    const list = el();
+    vm.runInContext("renderFinished", ctx)(list, meta);
+    const det = list.children[0];
+    const rows = det ? det.children.slice(1) : [];
+    check("two rows: the done one and the vanished one (open Latin vocab not listed)", rows.length === 2, `rows=${rows.length}`);
+    const titles = rows.map((r) => r.querySelector(".f-t").textContent);
+    check("vanished assignment is rebuilt from its snapshot", titles.includes("Canal essay") && titles.includes("Bio lab"), JSON.stringify(titles));
+    for (const r of rows) r.querySelector(".f-main").listeners.click();
+    check("tapping a row re-enters the work view for BOTH", calls.filter((c) => c[0] === "enterWork").map((c) => c[1]).sort().join() === "a-done,a-gone", JSON.stringify(calls));
+    const bioRow = rows.find((r) => r.querySelector(".f-t").textContent === "Bio lab");
+    const putBack = bioRow.querySelector(".f-acts").children.find((b) => /put back/.test(b.textContent));
+    await putBack.listeners.click({ stopPropagation() {} });
+    check("↩ put back un-marks done and refreshes", calls.some((c) => c[0] === "markDone" && c[1] === "a-done" && c[2] === false) && calls.some((c) => c[0] === "refreshAll"), JSON.stringify(calls));
+  }
+  console.log("== finishing a session keeps the thread ==");
+  {
+    const endSrc = fn(panel, "async function finishWork(");
+    check("no code path wipes the thread on done", !/thread:\s*\[\]/.test(endSrc), "found `thread: []` in finishWork");
+  }
+
   const failed = results.filter(([, ok]) => !ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exitCode = failed.length ? 1 : 0;
