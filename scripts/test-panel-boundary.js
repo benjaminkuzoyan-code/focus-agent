@@ -157,6 +157,31 @@ function makeContext({ health, settings }) {
     check("current dev answer → role dev with the current sig", ctx.FA.bridgeHealth?.role === "dev" && ctx.FA.bridgeHealth.sig === sigOK, JSON.stringify(ctx.FA.bridgeHealth));
   }
 
+  console.log("== assignment scope: the open Google Doc is read only when it is THIS assignment's ==");
+  {
+    // Real readOpenDoc / docBelongsTo / docTarget / docFor, with the history essay open in the tab.
+    const docFns = [fn(panel, "async function readOpenDoc("), fn(panel, "async function docBelongsTo("), fn(panel, "async function docTarget("), fn(panel, "async function docFor(")].join("\n");
+    const HISTORY = "https://docs.google.com/document/d/hist-essay-1/edit", LATIN = { id: "latin-test" }, HIST_A = { id: "hist-essay" };
+    const patches = [];
+    const meta = { "hist-essay": { docId: "hist-essay-1", docUrl: HISTORY }, "latin-test": {} };
+    const ctx = vm.createContext({
+      chrome: { tabs: { query: async () => [{ url: HISTORY, title: "Canal essay - Google Docs" }] } },
+      FA: { store: { getMeta: async () => meta, patchAssignmentMeta: async (id, patch) => patches.push([id, patch]) },
+            google: { readDoc: async () => ({ title: "Canal essay", text: "SYNTHETIC_HISTORY_TEXT" }) } },
+    });
+    vm.runInContext(docFns, ctx);
+    const latin = await vm.runInContext("readOpenDoc(" + JSON.stringify(LATIN) + ")", ctx);
+    check("Latin test + history doc in the tab: doc text NOT sent, note names it", latin.doc === null && /Canal essay/.test(latin.note) && !/SYNTHETIC/.test(JSON.stringify(latin)), JSON.stringify(latin));
+    const hist = await vm.runInContext("readOpenDoc(" + JSON.stringify(HIST_A) + ")", ctx);
+    check("history assignment + its own doc in the tab: doc text sent", hist.doc?.text === "SYNTHETIC_HISTORY_TEXT", JSON.stringify(hist));
+    const home = await vm.runInContext("readOpenDoc()", ctx);
+    check("home chat (no assignment): open doc still read", home.doc?.text === "SYNTHETIC_HISTORY_TEXT", JSON.stringify(home));
+    const t = await vm.runInContext("docTarget(" + JSON.stringify(LATIN) + ")", ctx);
+    check("chat-context docTarget on Latin: no doc, and the history doc is NOT bound to Latin", t.id === null && patches.length === 0, JSON.stringify({ t, patches }));
+    const t2 = await vm.runInContext("docTarget(" + JSON.stringify(LATIN) + ", { bindActiveTab: true })", ctx);
+    check("explicit doc action (format/edit) still adopts the active tab's doc", t2.id === "hist-essay-1" && patches.length === 1, JSON.stringify({ t2, patches }));
+  }
+
   const failed = results.filter(([, ok]) => !ok);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exitCode = failed.length ? 1 : 0;

@@ -1622,10 +1622,19 @@ function showWorkTyping() {
 }
 
 /** Read the Google Doc in the active tab, if there is one. */
-async function readOpenDoc() {
+/** The Google Doc in the active tab, for the coach.
+ *  With an assignment: ONLY that assignment's own doc is read (its bound docId, or a
+ *  gdoc it has attached as a file). Any other doc open in the tab -- the history essay
+ *  while the panel is on the Latin test -- is reported by title, never sent. Without an
+ *  assignment (home chat) the open doc is what's on screen and is read as before. */
+async function readOpenDoc(assignment = null) {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.url && /docs\.google\.com\/document\/d\//.test(tab.url)) {
+      if (assignment && !(await docBelongsTo(assignment, tab.url))) {
+        const title = (tab.title || "a Google Doc").replace(/ - Google Docs$/, "");
+        return { doc: null, note: `A Google Doc (“${title}”) is open in the tab but it isn't this assignment's doc, so you can't see it. If it belongs here, the student taps “+ this tab”.` };
+      }
       const d = await FA.google.readDoc(tab.url);
       return { doc: { title: d.title || tab.title?.replace(/ - Google Docs$/, "") || "", text: d.text.slice(0, 30000), truncated: d.text.length > 30000 }, note: "" };
     }
@@ -1658,10 +1667,10 @@ async function sendWork(text) {
   const sessions = await FA.store.getSessions();
   const weekAgo = Date.now() - 7 * 86400000;
   const week = sessions.filter((s) => s.endedAt > weekAgo);
-  const { doc, note } = await readOpenDoc();
+  const { doc, note } = await readOpenDoc(current.assignment);
   const session = await FA.store.getActiveSession();
   const files = await filesForBrain();
-  const target = await docTarget(current.assignment); // assignment's doc, else the Google Doc in the active tab
+  const target = await docTarget(current.assignment); // this assignment's doc only; never adopts the active tab
   const googleConnected = await FA.google.isConnected().catch(() => false);
 
   const context = {
@@ -1785,8 +1794,14 @@ async function precheckToChat() {
       return;
     }
   } else {
-    const { doc } = await readOpenDoc();
+    const { doc, note } = await readOpenDoc(current.assignment);
     draft = doc?.text?.trim() || "";
+    if (!draft && note) {
+      // A doc is open but it's another assignment's: never grade the wrong work.
+      await pushCoach("The doc in your tab isn't this assignment's, so I won't check it here. Paste the draft, or attach that doc with + this tab if it belongs to this assignment.");
+      current.awaitingDraft = true;
+      return;
+    }
   }
   if (draft.length < 20) {
     await pushCoach("Paste your draft here (or open it in a Google Doc tab) and I'll check it against the assignment — pointers, not rewrites.");
@@ -3062,9 +3077,24 @@ async function autoLearnVoice(a) {
 }
 
 /** Which doc are we talking about? The assignment's, else the one in the active tab. */
-async function docTarget(assignment) {
+/** Is this Google Doc URL one of the assignment's own: its bound doc, or a gdoc attached as a file? */
+async function docBelongsTo(assignment, url) {
+  const id = (url.match(/docs\.google\.com\/document\/d\/([\w-]+)/) || [])[1];
+  if (!id) return false;
+  const { id: bound } = await docFor(assignment);
+  if (bound === id) return true;
+  const meta = await FA.store.getMeta();
+  return (meta?.[assignment.id]?.files || []).some((f) => f.kind === "gdoc" && f.url?.includes(`/document/d/${id}`));
+}
+
+/** The assignment's doc. `bindActiveTab` (an explicit doc action: format, dev edit) adopts
+ *  the Google Doc in the active tab when the assignment has none yet. The chat context never
+ *  binds: opening the Latin test with the history essay in front must not make that essay
+ *  Latin's doc for good. */
+async function docTarget(assignment, { bindActiveTab = false } = {}) {
   const { id, url } = await docFor(assignment);
   if (id) return { id, url };
+  if (!bindActiveTab) return { id: null, url: null };
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const m = tab?.url?.match(/docs\.google\.com\/document\/d\/([\w-]+)/);
   if (m) {
@@ -3076,7 +3106,7 @@ async function docTarget(assignment) {
 
 /** Formatting only — every build. Never changes the words. */
 async function formatMyDoc() {
-  const { id } = await docTarget(current.assignment);
+  const { id } = await docTarget(current.assignment, { bindActiveTab: true });
   if (!id) return pushCoach("Open the Google Doc for this assignment in a tab (or start one with Smart Start) and tap format again.");
   if (!(await FA.google.isConnected().catch(() => false))) return pushCoach("Connect Google first (⚙ → connect G) — then I can format the doc.");
   showWorkTyping();
@@ -3161,7 +3191,7 @@ async function runAutopilot(assignment) {
 async function devEditDoc() {
   const instruction = window.prompt("What should the coach change in the doc?", "");
   if (!instruction) return;
-  const { id } = await docTarget(current.assignment);
+  const { id } = await docTarget(current.assignment, { bindActiveTab: true });
   if (!id) return pushCoach("No doc for this assignment — open it in a tab first.");
   showWorkTyping();
   try {
