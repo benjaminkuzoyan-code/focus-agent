@@ -85,6 +85,7 @@ DEFAULT_MODEL_OVERRIDES = {
     "debrief": "claude-sonnet-5",         # Haiku praised a session quit after 2 minutes
     "setup": "claude-sonnet-5",           # Haiku offered a Google Doc with Google not connected
     "chat:quiz": "claude-sonnet-5",       # quiz mode only: Haiku scored a wrong answer 1/1
+    "chat:doc": "claude-sonnet-5",        # developer-only doc writing: Haiku said "Done" with an invalid op (paragraph -1) -> nothing changed
     "writeStep": "claude-sonnet-5",       # developer-only: Haiku used one quote where two were required
 }
 
@@ -873,8 +874,13 @@ def build_chat(p):
             "{\"type\":\"insertAfter\",\"paragraph\":<i>,\"text\"} · {\"type\":\"replaceParagraph\",\"paragraph\":<i>,\"text\"} · "
             "{\"type\":\"deleteParagraph\",\"paragraph\":<i>} · {\"type\":\"setStyle\",\"paragraph\":<i>,\"style\":\"HEADING_2\"} · "
             "{\"type\":\"replaceBody\",\"text\"} (only for a full rewrite). Paragraph indexes count from 0 in the "
-            "attached doc's text, one per line. Write finished prose, never placeholders. Say what you did "
-            "in one line; the block does the writing. Never claim you can't write into the doc.\n\n"
+            "attached doc's text, one per line, and must exist (0 to N-1; to add at the very top, insertAfter the "
+            "last paragraph is wrong -- use replaceParagraph 0 with the new text + \"\\n\" + the old line, or "
+            "insertAfter 0 for below it). Plain text only inside ops: no markdown (# or **) -- a title/heading is "
+            "setStyle on that paragraph. Write finished prose, never placeholders. Do the edit NOW, in this reply: "
+            "never ask for details or permission first -- if something is unknown, write your best version and "
+            "say what to check. Say what you did in one line; the block does the writing. Never claim you can't "
+            "write into the doc.\n\n"
         )
     elif dev:
         write_block = (
@@ -1451,6 +1457,8 @@ class Handler(SimpleHTTPRequestHandler):
             payload = _normalize_for_role(dict(raw_payload), role)
             if method == "chat" and payload.get("quiz"):
                 _call.method = "chat:quiz"
+            elif method == "chat" and role == "dev" and payload.get("docTarget"):
+                _call.method = "chat:doc"   # the coach can write into the doc: ops must be valid
             # An image (photo of paper work, screenshot of the page) rides along
             # as a data URL; it goes to the model as a real image, never to disk
             # except for the claude -p engine's temp file.

@@ -1716,7 +1716,7 @@ async function sendWork(text) {
   const { doc, note } = await readOpenDoc(current.assignment);
   const session = await FA.store.getActiveSession();
   const files = await filesForBrain();
-  const target = await docTarget(current.assignment); // this assignment's doc only; never adopts the active tab
+  const target = await docTarget(current.assignment, { bindActiveTab: devAllowed() }); // dev adopts the open doc; students get this assignment's doc only
   const googleConnected = await FA.google.isConnected().catch(() => false);
 
   const context = {
@@ -1797,6 +1797,7 @@ async function applyDocOpsFromReply(reply, target, googleConnected) {
   if (!googleConnected) return `${rest}\n\n(the coach wanted to write into your doc — connect Google first: ⚙ → connect G)`;
   try {
     const r = await FA.google.editDoc(target.id, block.ops || []);
+    if (!r.applied) return `${rest}\n\n⚠️ the coach sent ${(block.ops || []).length} edit op${(block.ops || []).length === 1 ? "" : "s"} but none applied (bad paragraph index?) — nothing in your doc changed. Ask again, more specifically.`;
     if (current) await FA.store.patchAssignmentMeta(current.assignment.id, { coachWrote: true });
     return `${rest}\n\n✍️ ${block.summary || "wrote into your doc"} (${r.applied} change${r.applied === 1 ? "" : "s"})`;
   } catch (e) {
