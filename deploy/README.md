@@ -84,6 +84,13 @@ would travel unencrypted, so use HTTPS for anything beyond a test.
 ## Watching spend
 
 Anthropic Console → Usage. Set a monthly spend limit there before handing out
-codes. Claude Opus 5 at effort medium runs roughly 1-4¢ per coach reply;
-five friends doing real homework is on the order of $10-30/month. Drop
-`FA_API_MODEL=claude-sonnet-5` in the secrets if that's too much.
+codes. Most methods run on Claude Haiku 4.5 ($1 in / $5 out per million tokens). The ones that measurably
+need more are routed in `DEFAULT_MODEL_OVERRIDES` (`bridge/coach_server.py`): Sonnet 5 for plans, summaries,
+prechecks, photos, video and quiz-mode chat; Opus 5 for practice-test answer keys. Measured against the real
+method mix in the bridge log that is about **$0.002 per coach call** -- roughly $12/month for five friends at
+40 calls a night. Check the real number in Console → Usage after a homework night.
+
+`FA_MODEL_OVERRIDES=method:model,...` changes one method (`method:default` sends it back to Haiku,
+`FA_MODEL_OVERRIDES=none` puts everything on `FA_API_MODEL`). Don't move a method by feel: run
+`scripts/model_eval` (see its README) and let a failing case justify it. The
+server log prints the model on each line: `[coach] alice chat api 1500ms ok claude-haiku-4-5`.

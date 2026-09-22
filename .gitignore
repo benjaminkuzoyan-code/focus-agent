@@ -2,3 +2,24 @@ node_modules/
 .DS_Store
 *.log
 dist/
+
+# secrets: never commit these (repo is public)
+.env
+.env.*
+api_key
+tokens
+*.pem
+
+# model eval: local venv + raw run output
+scripts/model_eval/.venv/
+scripts/model_eval/results/
+scripts/model_eval/images/
+
+# local tool state (Claude Code, Codex, GSD): machine-specific, never for a public repo
+.claude/*
+!.claude/CLAUDE.md
+.codex/
+.gsd/
+.gsd-backups/
+.bg-shell/
+.mcp.json

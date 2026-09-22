@@ -56,14 +56,65 @@ ALLOW_ORIGINS = {o.strip() for o in os.environ.get("FA_ALLOW_ORIGINS", "").split
 # Methods only the developer role may call: they produce finished work.
 DEV_ONLY_METHODS = {"writeStep", "answerAll", "editDoc"}
 TOKENS_FILE = Path.home() / ".focus-agent" / "tokens"
-MODEL = "opus"         # claude-cli engine: coaching quality matters more than speed
+MODEL = "fable"        # claude-cli engine: Fable 5.1 for coaching
 CLAUDE_TIMEOUT = 150   # seconds; headless cold starts take a few seconds alone
 
 # API engine. The key never ships in the extension; it lives here, on the
-# machine running the bridge. Effort "medium" keeps chat replies in the
-# few-second range; set FA_EFFORT=high for slower, deeper answers.
-API_MODEL = os.environ.get("FA_API_MODEL", "claude-opus-5")
+# machine running the bridge. Haiku 4.5 is the default for every method: it is
+# the cheapest model ($1 in / $5 out per million tokens, a tenth of Fable 5.1)
+# and cost per coach call is what the pilot's margin rides on (Ben, 2026-09-20).
+API_MODEL = os.environ.get("FA_API_MODEL", "claude-haiku-4-5")
+# Effort only applies to models that accept it (not Haiku 4.5, which rejects
+# the parameter with a 400). "medium" keeps chat replies in the few-second range.
 API_EFFORT = os.environ.get("FA_EFFORT", "medium")
+
+
+# Methods that measurably need more than Haiku. From scripts/model_eval (68
+# cases, 2 reps each, 2026-09-21): a method is listed only because plain Haiku
+# FAILED a case there and this model passed it. Everything not listed passed on
+# Haiku. Re-run the eval before changing a line; don't move a method by feel.
+DEFAULT_MODEL_OVERRIDES = {
+    "practiceTest": "claude-opus-5",      # answer keys: Haiku AND Sonnet keyed wrong answers as correct (x = -5 for -6)
+    "panicPlan": "claude-sonnet-5",       # Haiku scheduled 80 min into 60, 47 into 25
+    "breakdownSteps": "claude-sonnet-5",  # Haiku invents question counts when the portal has no instructions
+    "studyPlan": "claude-sonnet-5",       # Haiku planned Saturday + Sunday sessions for a Friday test
+    "summarize": "claude-sonnet-5",       # Haiku added claims the reading never made
+    "precheck": "claude-sonnet-5",        # Haiku drafted the thesis for them / quoted text not in the draft
+    "readPhoto": "claude-sonnet-5",       # Haiku called wrong work correct; prose instead of JSON on a blurry photo
+    "videoSummary": "claude-sonnet-5",    # Haiku timestamps ~40 s off, one past the end of the video
+    "debrief": "claude-sonnet-5",         # Haiku praised a session quit after 2 minutes
+    "setup": "claude-sonnet-5",           # Haiku offered a Google Doc with Google not connected
+    "chat:quiz": "claude-sonnet-5",       # quiz mode only: Haiku scored a wrong answer 1/1
+    "writeStep": "claude-sonnet-5",       # developer-only: Haiku used one quote where two were required
+}
+
+
+def _load_model_overrides() -> dict:
+    """Per-method model overrides, so one method can run on a stronger model
+    without moving the rest off the cheap default.
+
+    Starts from DEFAULT_MODEL_OVERRIDES. FA_MODEL_OVERRIDES="method:model,..."
+    changes or adds entries; "method:default" sends one method back to
+    API_MODEL; FA_MODEL_OVERRIDES=none clears them all (everything on API_MODEL).
+    """
+    raw = os.environ.get("FA_MODEL_OVERRIDES", "").strip()
+    if raw.lower() == "none":
+        return {}
+    overrides = dict(DEFAULT_MODEL_OVERRIDES)
+    for pair in raw.split(","):
+        # The model is after the LAST colon: "chat:quiz:claude-sonnet-5" is method "chat:quiz".
+        method, _, model = pair.strip().rpartition(":")
+        method, model = method.strip(), model.strip()
+        if not method or not model:
+            continue
+        if model == "default":
+            overrides.pop(method, None)
+        else:
+            overrides[method] = model
+    return overrides
+
+
+MODEL_OVERRIDES = _load_model_overrides()
 API_KEY_FILE = Path.home() / ".focus-agent" / "api_key"
 # claude-cli engine runs from an EMPTY directory on purpose: run from $HOME it
 # picked up ~/CLAUDE.md and the auto-memory for that folder, so every coach
@@ -343,12 +394,17 @@ def _system(p):
 # returns (prompt_text, expected_top_level_keys) for validation.
 
 def build_pick(p):
+    # Missing work comes first -- a rule, so the code enforces it: when anything
+    # is missing the model only sees the missing assignments, biggest first.
+    # (Left to the prompt, Haiku picked a non-missing essay about 1 time in 3.)
+    assignments = [a for a in (p.get("assignments") or []) if isinstance(a, dict)]
+    missing = sorted((a for a in assignments if a.get("missing")), key=lambda a: -(a.get("points") or 0))
     return (
         f"Assignments (ranked by urgency, with the student's personal time estimates):\n"
-        f"{json.dumps(p.get('assignments', []))}\n\n"
+        f"{json.dumps(missing or assignments)}\n\n"
         f"the student's recent stats: {json.dumps(p.get('stats', {}))}\n\n"
         "Rule: anything marked missing (a zero in the gradebook right now) or overdue comes before everything else -- "
-        "pick the missing one with the biggest grade impact first; only when nothing is missing or overdue weigh the rest.\n"
+        "pick the missing one with the biggest grade impact (most points) first; only when nothing is missing or overdue weigh the rest.\n"
         'Choose the ONE assignment the student should start right now. Reply JSON: '
         '{"id": "<assignment id>", "reason": "<≤25 words, concrete and motivating, '
         'reference real numbers (time estimates, deadlines) when they help>"}'
@@ -373,9 +429,10 @@ def build_panic(p):
 def build_breakdown(p):
     return (
         f"Assignment: {json.dumps(p.get('assignment', {}))}\n\n"
+        + NO_INSTRUCTIONS +
         "Break it into concrete steps a 9th grader can start immediately. First "
         "step must take under 5 minutes (starting is the hard part). Steps must "
-        "be specific to THIS assignment, not generic study advice. Reply JSON: "
+        "be specific to THIS assignment, not generic study advice. " + NO_ANSWERS_IN_STEPS + "Reply JSON: "
         '{"steps": ["<step>", ...]} with 3-6 steps.'
     ), ["steps"]
 
@@ -383,11 +440,15 @@ def build_breakdown(p):
 def build_breakdown_steps(p):
     return (
         f"Assignment (instructions included when the portal had them): {json.dumps(p.get('assignment', {}))}\n\n"
+        + NO_INSTRUCTIONS +
         "Break it into a checklist a 9th grader can start immediately. Each step "
         "names what EXISTS when it's done (the deliverable) and how many minutes it "
         "takes at a normal pace -- every step 3-25 minutes, the first under 5. Steps "
         "must be specific to THIS assignment (quote its parts), not generic study "
         "advice. Make the task SMALLER, not easier: don't do the work, cut it up. "
+        + NO_ANSWERS_IN_STEPS +
+        "The FIRST step's estMin is 5 or less: if the natural first step is bigger (reading, research), make "
+        "the first step opening it and finding the part that matters. "
         'Reply JSON: {"steps": [{"text": "<instruction, ≤18 words>", '
         '"deliverable": "<what exists when done, ≤12 words>", "estMin": <int>}]} '
         "with 3-7 steps."
@@ -584,7 +645,8 @@ def build_read_page(p):
         "(mark unreadable bits [?]); keep numbering, headings and blanks (write ____ for a blank to fill). <= 2500 chars.\n"
         "2) For every figure, diagram, graph, table, map, photo or equation, give a plain one-or-two-sentence description "
         "of what it shows (axes, labels, what's being compared, what the equation relates) -- describe, don't interpret or solve.\n"
-        "If the page is blank or purely decorative say so. "
+        "Transcribe ONLY what is visibly on the page: the file name and the assignment tell you nothing about "
+        "what this page says. If the page is blank or purely decorative, blank is true and text is empty. "
         'Reply JSON: {"text": "<transcription>", "figures": ["<description>", ...], "blank": true|false}'
     ), ["text"]
 
@@ -887,7 +949,9 @@ def build_explain(p):
         "Explain this assignment to the student clearly: "
         "what the teacher is really asking for, what 'done well' looks like, the "
         "traps students fall into, and the very first thing to do. Plain language, "
-        "no jargon, no filler. Do NOT do the assignment or give answers. Reply JSON: "
+        "no jargon, no filler. Do NOT do the assignment or give answers: any example "
+        "uses different numbers or a different topic than the assignment's own problems. "
+        + NO_INSTRUCTIONS + "Reply JSON: "
         '{"tldr": "<≤25 words: what this actually is>", '
         '"wants": ["<what the teacher wants, ≤15 words each>", ...] (2-4 items), '
         '"traps": ["<common mistake, ≤15 words>", ...] (1-3 items), '
@@ -1027,22 +1091,64 @@ def _images(image):
     return list(image) if isinstance(image, (list, tuple)) else [image]
 
 
+# The method being served on this thread. The builders call ask_claude() with
+# no method argument, so the request handler leaves the name here and the API
+# call reads it to pick a model (ThreadingHTTPServer = one thread per request).
+_call = threading.local()
+
+
+def _model_for(method: str) -> str:
+    """The API model for a route: its own override ("chat:quiz"), else its
+    method's override ("chat"), else API_MODEL."""
+    return MODEL_OVERRIDES.get(method) or MODEL_OVERRIDES.get(method.split(":")[0]) or API_MODEL
+
+
+def _split_spec(spec: str):
+    """A model spec is a model id, optionally with "+think" on the end:
+    "claude-haiku-4-5+think" = Haiku with a small thinking budget, the rung
+    between plain Haiku and Sonnet for methods that need to work something out
+    (answer keys, arithmetic). Returns (model_id, think)."""
+    model, _, flag = spec.partition("+")
+    return model, flag == "think"
+
+
+HAIKU_THINK_BUDGET = 4000   # tokens; billed as output, only when the spec says +think
+
+
+def _api_extras(model: str, think: bool = False) -> dict:
+    """Request options that depend on the model.
+
+    Haiku 4.5 rejects `output_config.effort` with a 400 and has no server-side
+    refusal fallback, so it gets a plain request: no thinking by default (its
+    cheapest mode), or a fixed thinking budget when the spec asks for it.
+    Every other model thinks adaptively, keeps effort as the latency knob, and
+    fallbacks='default' re-runs a classifier decline on another model
+    server-side instead of surfacing a refusal.
+    """
+    if model.startswith("claude-haiku"):
+        return {"thinking": {"type": "enabled", "budget_tokens": HAIKU_THINK_BUDGET}} if think else {}
+    return {
+        "extra_headers": {"anthropic-beta": "server-side-fallback-2026-07-01"},
+        "extra_body": {"fallbacks": "default", "output_config": {"effort": API_EFFORT}},
+    }
+
+
 def _complete_api(system: str, prompt: str, image=None) -> str:
-    """One Claude API call. Thinking is adaptive by default on this model;
-    effort is the latency knob. fallbacks='default' re-runs a classifier
-    decline on another model server-side instead of surfacing a refusal.
+    """One Claude API call, on the model chosen for the current method.
     `image` = {"media_type": "image/jpeg", "data": "<base64>"} (or a list of
     them: video frames, in order) goes in as real image blocks so the model
     actually sees them (a photo of paper work, a screenshot, a PDF page)."""
     content = [{"type": "image", "source": {"type": "base64", "media_type": im["media_type"], "data": im["data"]}} for im in _images(image)]
     content.append({"type": "text", "text": prompt})
+    spec = _model_for(getattr(_call, "method", ""))
+    _call.model = spec   # for the log line
+    model, think = _split_spec(spec)
     resp = _api_client().messages.create(
-        model=API_MODEL,
+        model=model,
         max_tokens=16000,
         system=system,
         messages=[{"role": "user", "content": content}],
-        extra_headers={"anthropic-beta": "server-side-fallback-2026-07-01"},
-        extra_body={"fallbacks": "default", "output_config": {"effort": API_EFFORT}},
+        **_api_extras(model, think),
     )
     if resp.stop_reason == "refusal":
         details = getattr(resp, "stop_details", None)
@@ -1108,6 +1214,27 @@ def _complete(system: str, prompt: str, image=None) -> str:
     return _complete_api(system, prompt, image) if ENGINE == "api" else _complete_cli(system, prompt, image)
 
 
+# Small models answer in prose when something is off (no instructions, a blank
+# or unreadable image), and a prose reply is a 502 for the student.
+JSON_ONLY = (
+    "\n\nReply with that ONE JSON object and nothing else -- no text before or after it. If something is "
+    "missing, unclear, blank or unreadable, say so INSIDE the JSON fields; never answer in prose."
+)
+
+# An assignment that is only a title: the portal had no instructions. Guessing
+# what it covers reads as confident and is wrong; every model did it.
+NO_ANSWERS_IN_STEPS = (
+    "A step or deliverable NAMES what will exist ('six labelled active forms', 'the factored form of #1'); it "
+    "never CONTAINS any of it -- no conjugated form, no solved value or factor, no thesis or sentence of theirs. "
+)
+
+NO_INSTRUCTIONS = (
+    "If the assignment has no instructions (just a title), do NOT guess what it covers, how many questions "
+    "it has or what the teacher wants: say the instructions are missing, and make the first move finding them "
+    "(the portal post, the class page, the handout, a classmate). "
+)
+
+
 def ask_claude_text(prompt: str, system: str = COACH_IDENTITY, image=None) -> str:
     """Run one Claude call and return the raw text reply."""
     text = _complete(system, prompt, image)
@@ -1122,7 +1249,7 @@ def ask_claude_text(prompt: str, system: str = COACH_IDENTITY, image=None) -> st
 
 def ask_claude(prompt: str, system: str = COACH_IDENTITY, image=None):
     """Run one Claude call and parse the JSON out of its reply."""
-    text = _complete(system, prompt, image)
+    text = _complete(system, prompt + JSON_ONLY, image)
     # Claude was told JSON-only, but strip fences defensively.
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     match = re.search(r"\{.*\}", text, re.DOTALL)
@@ -1308,6 +1435,7 @@ class Handler(SimpleHTTPRequestHandler):
             if not isinstance(req, dict) or not isinstance(req.get("method"), str) or req["method"] not in BUILDERS:
                 return self._send_json(400, {"error": "unknown method"})
             method = req["method"]
+            _call.method, _call.model = method, ""   # read by _complete_api to pick the model
             builder = BUILDERS[method]
             raw_payload = req.get("payload", {})
             if raw_payload is None:
@@ -1321,6 +1449,8 @@ class Handler(SimpleHTTPRequestHandler):
                 print(f"[coach] {log_id} {method} refused (role {role})", flush=True)
                 return self._send_json(403, {"error": "that's a developer-only action -- the coach explains and checks your work, it doesn't write it"})
             payload = _normalize_for_role(dict(raw_payload), role)
+            if method == "chat" and payload.get("quiz"):
+                _call.method = "chat:quiz"
             # An image (photo of paper work, screenshot of the page) rides along
             # as a data URL; it goes to the model as a real image, never to disk
             # except for the claude -p engine's temp file.
@@ -1380,14 +1510,14 @@ class Handler(SimpleHTTPRequestHandler):
                 }})
             if method == "chat":
                 reply = ask_claude_text(prompt, system, image)
-                print(f"[coach] {log_id} chat {ENGINE} {int((time.time() - t0) * 1000)}ms ok", flush=True)
+                print(f"[coach] {log_id} chat {ENGINE} {int((time.time() - t0) * 1000)}ms ok {getattr(_call, 'model', '')}".rstrip(), flush=True)
                 return self._send_json(200, {"ok": True, "result": {"reply": reply}})
             result = ask_claude(prompt, system, image)
             missing = [k for k in required if k not in result]
             if missing:
                 print(f"[coach] {log_id} {method} {ENGINE} incomplete reply", flush=True)
                 return self._send_json(502, {"error": PUBLIC_BAD_REPLY})
-            print(f"[coach] {log_id} {method} {ENGINE} {int((time.time() - t0) * 1000)}ms ok", flush=True)
+            print(f"[coach] {log_id} {method} {ENGINE} {int((time.time() - t0) * 1000)}ms ok {getattr(_call, 'model', '')}".rstrip(), flush=True)
             return self._send_json(200, {"ok": True, "result": result})
         except Exception as e:  # noqa: BLE001 -- report anything to the client, safely
             # The client gets a FIXED sentence (CoachError.public or the
@@ -1423,7 +1553,7 @@ if __name__ == "__main__":
     print(f"Focus Agent bridge on http://{HOST}:{PORT}  (auth: {len(TOKENS)} access code(s), cap {DAILY_CAP}/day each)" if TOKENS
           else f"Focus Agent bridge on http://{HOST}:{PORT}  (open: local use only)", flush=True)
     if ENGINE == "api":
-        print(f"  coach brain : Claude API (model={API_MODEL}, effort={API_EFFORT})")
+        print(f"  coach brain : Claude API (model={API_MODEL}, overrides={MODEL_OVERRIDES or 'none'})")
     else:
         print(f"  coach brain : claude -p (headless, model={MODEL}) -- no API key found")
         print(f"                put one in {API_KEY_FILE} (or export ANTHROPIC_API_KEY) for the fast engine")
