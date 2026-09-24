@@ -144,10 +144,24 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
     const doc = await window.FA.google.getDoc("synthetic-doc");
     check("actual Chrome tracer authenticates Docs", doc.title === "Auth tracer" && authEffects.find(e => e[0] === "docs")?.[1].headers.Authorization === "Bearer synthetic-chrome-token");
     authEffects.length = 0;
-    // Re-evaluate the real Google module and renderer as a reopened panel would.
-    window.eval(fs.readFileSync(path.join(ROOT, "lib/google.js"), "utf8"));
-    await window.eval("renderGoogleChip()");
-    check("persisted status renders after reload without identity calls", $("google-btn").textContent === "G ✓ connected" && authEffects.length === 0);
+    // Boot a second actual panel with fresh script globals and the persisted store.
+    const reopened = new JSDOM(html, {
+      url: "chrome-extension://test/sidepanel/panel.html", runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc,
+      beforeParse(w) {
+        w.chrome = chrome;
+        w.fetch = window.fetch;
+        Object.defineProperty(w, "crypto", { value: webcrypto });
+        w.confirm = () => false;
+        w.navigator.clipboard = { writeText: async () => {} };
+        w.scrollTo = () => {};
+      },
+    });
+    const listenerCount = changeListeners.length;
+    for (const src of srcs) reopened.window.eval(fs.readFileSync(path.join(ROOT, "sidepanel", src), "utf8"));
+    await sleep(1800);
+    check("persisted status renders after reload without identity calls", reopened.window.document.getElementById("google-btn").textContent === "G ✓ connected" && authEffects.length === 0);
+    changeListeners.splice(listenerCount);
+    reopened.window.close();
     await chrome.storage.local.set({ googleAuthState: { version: 1, status: "disconnected", selectedDoor: null, everConnected: true, reason: null } });
     await sleep(30);
     check("storage notification updates actual chip", $("google-btn").textContent === "connect G");
