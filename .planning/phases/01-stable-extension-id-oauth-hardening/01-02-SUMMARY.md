@@ -104,3 +104,13 @@ None introduced. Optional empty account email is valid when userinfo does not su
 ## Self-Check: PASSED
 
 All four implementation files exist; all six task commit hashes were verified. The measured implementation count is six from the persisted ledger before metadata commit; token actuals use realized implementation diff characters divided by four, rounded up.
+
+## Review Fixes — CR-01, CR-02, CR-03
+
+The independent review reproduced three missing edge cases after the original plan completion. Test-only commit `5f7b156` executed 59 auth cases with five targeted failures; `check tdd-red-evidence` returned `RED_EVIDENCE_OK`. Fix commit `dd17693` addresses all three findings without new scopes, dependencies or architecture. The original frontmatter actuals above describe the original execution; these two follow-up implementation commits are additional review work.
+
+- **CR-01:** Explicit disconnect persists `userDisconnected` and blocks subsequent silent identity acquisition, preflight probes and bearer feature calls, including after reload and failed revocation. Only an explicit successful connection clears that intent. First-run/no-record state retains its separate migration behavior.
+- **CR-02:** An unexpired cached web token remains usable without optional identity metadata. Silent replacement requires a saved verified email and a verified matching email returned by userinfo for the new token. Missing binding, unavailable userinfo, unverified email and mismatched identity fail closed to deliberate reconnect. A login hint alone is insufficient. Existing renewal fixtures now provide verified synthetic identity; explicit connection remains valid without email metadata and will require explicit reconnection upon expiry.
+- **CR-03:** Preflight probes receive the same operation ordering as API requests. Their failed authorization status write checks for newer authenticated success, including after asynchronous storage reads. Successful probes do not independently prove bearer resource access or update `latestSuccess`.
+
+Verification after fixes: **59/59 auth**, **22/22 focused panel OAuth**, **14/14 background**, and **38/38 panel boundary** passed. The panel now also proves disconnected feature activity cannot silently restore the connection. `git diff --check` passed. No full-suite rerun was performed; 01-04 owns final regression and archive rebuild. Global AUTH acceptance remains pending live verification. REVIEW.md was left unchanged for independent recheck.

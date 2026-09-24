@@ -1,5 +1,10 @@
 # Project Learnings
 
+**2026-09-24 — OAuth account-continuity review**
+- Observation: The current Docs/Drive/Calendar scope set may return no userinfo email. A saved login hint cannot establish which account owns a renewed web token, and clearing Chrome's token cache does not enforce the user's disconnect intent.
+- Action: Keep explicit disconnect intent in shared status. Permit silent web-token replacement only with a saved verified identity and a verified matching replacement; otherwise preserve valid cached access and require the explicit chooser when renewal is needed.
+- Confidence: high
+
 **2026-09-24 — Repository sync**
 - Observation: This repository's `main` branch tracks `origin/main` at `benjaminkuzoyan-code/focus-agent` on GitHub.
 - Action: Pull from the configured upstream when syncing this checkout; use fast-forward pulls to preserve local history.
