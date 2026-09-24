@@ -12,13 +12,15 @@ const test = (name, run) => tests.push({ name, run });
 function harness(options = {}) {
   const store = options.store || {};
   const effects = [];
+  const listeners = [];
+  const emit = changes => listeners.forEach(fn => fn(changes, 'local'));
   const chrome = {
     runtime: { getManifest: () => manifest },
     storage: { local: {
       async get(key) { return typeof key === 'string' ? { [key]: store[key] } : { ...store }; },
-      async set(value) { effects.push(['set', value]); Object.assign(store, value); },
-      async remove(key) { effects.push(['remove', key]); delete store[key]; },
-    } },
+      async set(value) { effects.push(['set', value]); const changes = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, { oldValue: store[k], newValue: v }])); Object.assign(store, value); emit(changes); },
+      async remove(key) { effects.push(['remove', key]); const oldValue = store[key]; delete store[key]; emit({ [key]: { oldValue } }); },
+    }, onChanged: { addListener(fn) { listeners.push(fn); } } },
     identity: {
       getRedirectURL: () => 'https://synthetic.chromiumapp.org/',
       getAuthToken(details, cb) {
@@ -190,6 +192,87 @@ test('disconnect supersedes pending connect without late success writes', async 
   finish('late-synthetic-token');
   await rejected;
   assert.equal(h.store.googleAuthState.status, 'disconnected');
+});
+
+const connected = (door = 'chrome') => ({ version: 1, status: 'connected', selectedDoor: door, everConnected: true, reason: null });
+const response = (status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => ({ title: 'Recovered', error: { message: 'PRIVATE provider payload' } }), arrayBuffer: async () => Uint8Array.from([1, 2, 3]).buffer });
+const identityFailure = message => (_, cb, chrome) => { chrome.runtime.lastError = { message }; cb(); delete chrome.runtime.lastError; };
+const oauthFailure = error => (details, cb) => { const u = callbackFor(details); u.hash = new URLSearchParams({ state: new URL(details.url).searchParams.get('state'), error }); cb(u.href); };
+test('terminal 401 retries once, evicts both exact tokens and persists reconnect', async () => {
+  let n = 0;
+  const h = harness({ store: { googleAuthState: connected() }, chrome: (_, cb) => cb('token-' + ++n), fetch: async () => response(401) });
+  await assert.rejects(h.google.getDoc('doc'), e => e.category === 'authorization');
+  assert.equal(h.effects.filter(e => e[0] === 'fetch').length, 2);
+  assert.deepEqual(h.effects.filter(e => e[0] === 'forget').map(e => e[1].token), ['token-1', 'token-2']);
+  assert.equal(h.store.googleAuthState.status, 'reconnect');
+  assert.ok(h.effects.filter(e => e[0] === 'chrome').every(e => e[1].interactive === false));
+});
+test('Drive bytes share one silent 401 retry and preserve binary data', async () => {
+  let n = 0;
+  const h = harness({ store: { googleAuthState: connected() }, fetch: async () => response(++n === 1 ? 401 : 200) });
+  assert.deepEqual([...new Uint8Array(await h.google.fetchDriveFileBytes('file'))], [1, 2, 3]);
+  assert.equal(n, 2);
+  assert.equal(h.store.googleAuthState.status, 'connected');
+});
+test('saved web 401 retains chosen door and identity hint during renewal', async () => {
+  let n = 0;
+  const h = harness({ store: { googleAuthState: connected('web'), googleWebToken: { access_token: 'old', expires_at: Date.now() + 3600000, email: 'chosen@example.test' } }, web: webSuccess,
+    fetch: async url => url.includes('userinfo') ? response() : response(++n === 1 ? 401 : 200) });
+  await h.google.getDoc('doc');
+  assert.equal(h.effects.filter(e => e[0] === 'chrome').length, 0);
+  assert.equal(new URL(h.effects.find(e => e[0] === 'web')[1].url).searchParams.get('login_hint'), 'chosen@example.test');
+  assert.equal(h.store.googleAuthState.selectedDoor, 'web');
+});
+for (const [message, category] of [['login_required', 'authorization'], ['network offline', 'network'], ['invalid_client', 'configuration'], ['mystery', 'unknown'], ['access_denied', 'cancelled'], ['Service has been disabled for this account.', 'policy_disabled']]) {
+  test('mixed silent causes preserve status: ' + category, async () => {
+    const h = harness({ store: { googleAuthState: connected() }, chrome: identityFailure(message), web: oauthFailure('login_required') });
+    await assert.rejects(h.google.getDoc('doc'), e => e.category === category && (category === 'cancelled' || e.attempts.length === 2));
+    assert.equal(h.store.googleAuthState.status, category === 'authorization' ? 'reconnect' : 'connected');
+  });
+}
+test('first-run authorization failure remains disconnected', async () => {
+  const h = harness({ chrome: identityFailure('login_required'), web: oauthFailure('login_required') });
+  await assert.rejects(h.google.getDoc('doc'), e => e.category === 'authorization');
+  assert.equal((await h.google.status()).status, 'disconnected');
+});
+for (const [code, category] of [[403, 'resource'], [404, 'resource'], [429, 'network'], [500, 'network']]) test('HTTP ' + code + ' stays distinct and sanitized', async () => {
+  const h = harness({ store: { googleAuthState: connected() }, fetch: async () => response(code) });
+  await assert.rejects(h.google.getDoc('doc'), e => e.category === category && e.status === code && !e.message.includes('PRIVATE'));
+  assert.equal(h.store.googleAuthState.status, 'connected');
+  assert.equal(h.effects.filter(e => e[0] === 'fetch').length, 1);
+});
+test('ambiguous network failure never replays a Calendar write', async () => {
+  const h = harness({ store: { googleAuthState: connected() }, fetch: async () => { throw new Error('PRIVATE offline'); } });
+  await assert.rejects(h.google.addEvent({ title: 'focus', start: 0, end: 60000 }), e => e.category === 'network' && !e.message.includes('PRIVATE'));
+  assert.equal(h.effects.filter(e => e[0] === 'fetch').length, 1);
+});
+test('successful 204 keeps null response shape', async () => {
+  const h = harness({ fetch: async () => response(204) });
+  assert.equal(await h.google.getDoc('doc'), null);
+});
+test('external disconnect supersedes delayed identity success', async () => {
+  let finish;
+  const h = harness({ store: { googleAuthState: connected() }, chrome: (_, cb) => { finish = cb; } });
+  const pending = h.google.getDoc('doc');
+  const rejected = assert.rejects(pending, e => e.category === 'cancelled');
+  await new Promise(resolve => setImmediate(resolve));
+  await h.chrome.storage.local.remove('googleAuthState');
+  finish('late-token');
+  await rejected;
+  assert.equal((await h.google.status()).status, 'disconnected');
+  assert.equal(h.effects.filter(e => e[0] === 'fetch').length, 0);
+});
+test('late web 401 cannot erase newer credentials or successful status', async () => {
+  let finish, calls = 0;
+  const h = harness({ store: { googleAuthState: connected('web'), googleWebToken: { access_token: 'old', expires_at: Date.now() + 3600000 } }, web: webSuccess,
+    fetch: async url => url.includes('userinfo') ? response() : ++calls === 1 ? new Promise(resolve => { finish = resolve; }) : response() });
+  const pending = h.google.getDoc('doc');
+  await new Promise(resolve => setImmediate(resolve));
+  await h.google.connect();
+  finish(response(401));
+  await pending.catch(e => assert.equal(e.category, 'cancelled'));
+  assert.equal(h.store.googleWebToken.access_token, 'synthetic-web-token');
+  assert.equal(h.store.googleAuthState.status, 'connected');
 });
 
 (async () => {
