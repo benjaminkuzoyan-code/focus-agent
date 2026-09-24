@@ -274,6 +274,44 @@ test('late web 401 cannot erase newer credentials or successful status', async (
   assert.equal(h.store.googleWebToken.access_token, 'synthetic-web-token');
   assert.equal(h.store.googleAuthState.status, 'connected');
 });
+test('late terminal Chrome failure cannot replace newer successful status', async () => {
+  let finish, acquisitions = 0, calls = 0;
+  const h = harness({ store: { googleAuthState: connected() }, chrome: (_, cb) => cb('token-' + ++acquisitions),
+    fetch: async () => ++calls === 1 ? response(401) : calls === 2 ? new Promise(resolve => { finish = resolve; }) : response() });
+  const old = h.google.getDoc('old');
+  const rejected = assert.rejects(old, e => e.category === 'authorization');
+  await new Promise(resolve => setImmediate(resolve));
+  await h.google.getDoc('new');
+  finish(response(401));
+  await rejected;
+  assert.equal(h.store.googleAuthState.status, 'connected');
+  assert.deepEqual(h.effects.filter(e => e[0] === 'forget').map(e => e[1].token), ['token-1', 'token-2']);
+});
+test('expired selected web grant marks reconnect without adopting Chrome', async () => {
+  const h = harness({ store: { googleAuthState: connected('web'), googleWebToken: { access_token: 'expired', expires_at: 1 } }, web: oauthFailure('login_required') });
+  await assert.rejects(h.google.getDoc('doc'), e => e.category === 'authorization');
+  assert.equal(h.store.googleAuthState.status, 'reconnect');
+  assert.equal(h.effects.filter(e => e[0] === 'chrome').length, 0);
+});
+test('external account selection cancels an interleaved Chrome request', async () => {
+  let finish;
+  const h = harness({ store: { googleAuthState: connected() }, fetch: async () => new Promise(resolve => { finish = resolve; }) });
+  const old = h.google.getDoc('old');
+  const rejected = assert.rejects(old, e => e.category === 'cancelled');
+  await new Promise(resolve => setImmediate(resolve));
+  await h.chrome.storage.local.set({ googleAuthState: connected('web'), googleWebToken: { access_token: 'replacement', expires_at: Date.now() + 3600000 } });
+  finish(response(401));
+  await rejected;
+  assert.equal(h.store.googleWebToken.access_token, 'replacement');
+  assert.equal(h.store.googleAuthState.selectedDoor, 'web');
+});
+test('offline revocation still clears local connection and credentials', async () => {
+  const h = harness({ store: { googleAuthState: connected('web'), googleWebToken: { access_token: 'old', expires_at: Date.now() + 3600000 } }, fetch: async () => { throw new Error('offline'); } });
+  await h.google.disconnect();
+  assert.equal(h.store.googleWebToken, undefined);
+  assert.equal((await h.google.status()).status, 'disconnected');
+  assert.equal((await h.google.status()).selectedDoor, null);
+});
 
 (async () => {
   let passed = 0;
