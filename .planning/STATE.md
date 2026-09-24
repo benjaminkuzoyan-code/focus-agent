@@ -4,16 +4,16 @@ milestone: v0.8.21
 current_phase: 1
 current_phase_name: Stable Extension ID + OAuth Hardening
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-09-24T23:38:29.953Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-09-24T23:46:47.951Z"
 last_activity: 2026-09-24
 last_activity_desc: Phase 1 execution started
-state_head: 403f6ea3301afe356cdb95a7c6200e705d1f5792
+state_head: 6f279e23fe55e167febf9e1e10a9c1ec5d1d253a
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-17)
 
 Phase: 1 (Stable Extension ID + OAuth Hardening) — EXECUTING
 Next up after Phase 1: Phase 1.5 (Fly.io Coach Hosting + Pilot Smoke Test) — roadmapped, not yet discussed/planned
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-09-24 — Phase 1 execution started
 
@@ -71,6 +71,7 @@ This project uses **GSD** (a structured planning/build workflow: discuss → pla
 |------|----------|-------|-------|
 | Phase 01 P01 | 12min | 2 tasks | 5 files |
 | Phase 01 P02 | 8min | 2 tasks | 4 files |
+| Phase 01 P03 | 8min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -87,6 +88,7 @@ Recent decisions affecting current work:
 - Roadmap: No phase schedules blocking-tier distraction handling (ENGAGE-01) — explicitly gated on Ben's undecided conversation with his dad, deferred to v2 per REQUIREMENTS.md.
 - [Phase 1]: Permanent public manifest key derives extension ID hamjokekeddfckjjfmciillddifhdeda; do not rotate the ignored local signing key.
 - [Phase 1]: Selected web account intent survives token invalidation; global AUTH acceptance remains pending real Google verification in 01-04.
+- [Phase 1]: Pin package identity to hamjokekeddfckjjfmciillddifhdeda and validate both OAuth clients against source; live acceptance remains pending in 01-04.
 
 ### Pending Todos
 
@@ -112,7 +114,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-24T23:38:29.943Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-09-24T23:46:47.942Z
+Stopped at: Completed 01-03-PLAN.md
 Resume file: None
 Next command: /gsd-progress (to confirm state), then /gsd-plan-phase 1
