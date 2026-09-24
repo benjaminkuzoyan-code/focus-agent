@@ -26,7 +26,39 @@ The executor performs these commands; Ben receives the resulting archive, SHA-25
 3. Confirm both resulting manifests retain the same key/ID and the friends archive contains `build.json` with `{"build":"friends"}`. Record SHA-256 of `dist/focus-agent-0.8.21.zip` and `dist/focus-agent-0.8.21-friends.zip` after all source edits are finished. Existing archives from earlier work are not release evidence.
 4. Deliver an extracted friends build for the separate test profile. Rebuild both archives and refresh hashes if either public OAuth client ID changes during owner setup. Keep the public manifest key unchanged.
 
-Final standard archive SHA-256: **pending**. Final friends archive SHA-256: **pending**. Source commit: **pending**.
+### Final automated readiness evidence — 2026-09-24 UTC
+
+Source checkout: `8087fabf85e7bebcaa90a6613ff38874d29f5732`; the latest auth source fix is `dd176935313021e383eea966dcfb143cb418caa2`. The targeted review at that source commit is clean: CR-01, CR-02 and CR-03 resolved, with zero unresolved findings. No source changes followed that review before these builds. This record establishes package readiness only; neither public OAuth client has owner confirmation yet.
+
+| Final artifact | SHA-256 | Extracted validation |
+| --- | --- | --- |
+| `dist/focus-agent-0.8.21.zip` | `6d2816a47fb918d6f57fa2914b6e16316997e7e2d30b902af0c710d30c76fe75` | Passed, 299 regular files |
+| `dist/focus-agent-0.8.21-friends.zip` | `5dd2a53b5a6d559cff68f8ffc36352f33d6693929316eaa8a5b20eb2b4dba730` | Passed, 300 regular files |
+
+Both archive paths are relative to `/Users/vanshkumar/Documents/ext_repos/focus-agent`. The friends archive is also ready to **Load unpacked** at `/Users/vanshkumar/Documents/ext_repos/focus-agent/dist/focus-agent-0.8.21-friends-unpacked.gZY7OD`. That directory was copied from the validated friends extraction. It has not been loaded into a browser. Re-extract the named ZIP if the generated directory is later removed.
+
+Each ZIP was extracted to its own newly created temporary directory and checked with `node scripts/test-oauth-package.js --stage DIR` against the actual extracted tree. Both passed credential exclusion, exact cleaned manifest/client matching and permanent identity checks. The extracted keys were also compared directly with source; both derive `hamjokekeddfckjjfmciillddifhdeda`. The standard archive has no `build.json`; friends has exactly `{"build":"friends"}`. The viewer, offscreen sound, panel, background and Google module files match source. Only the two task-created temporary validation directories were removed; the prepared friends directory remains available. No private signing file was read or regenerated.
+
+| Automated check | Observed result |
+| --- | --- |
+| Complete `package.json` test chain via bundled pnpm/Node | Exit 0: 252/252 assertions across all six suites |
+| Security | 89/89 passed |
+| Panel boundary | 38/38 passed |
+| Background | 14/14 passed |
+| Docops | 17/17 passed; `ALL PASSED` |
+| Real-module Google auth with fixture providers | 59/59 passed |
+| OAuth package fixtures | 35/35 passed |
+| Focused panel OAuth, `node scripts/smoke-panel.js --google-auth` | 22/22 passed; `GOOGLE AUTH PASSED` |
+| Toolbar, `node scripts/smoke-toolbar.js` | 13/13 passed; `ALL PASSED` |
+| Full panel diagnostic, `node scripts/smoke-panel.js` | Exit 1: exactly the seven previously recorded baseline failures, listed below |
+| Both package builders and both post-extraction validators | All exited 0 |
+| `git diff --check` | Passed |
+
+The full panel diagnostic still fails: checkpoint posted at chunk boundary; checkpoint action marks the current step; paper mode detected when nothing moved; worker-ended session opens the done view; developer toggle persists; developer write without the brain shows offline state; finishing an assignment clears its chat log. These match `LEARNINGS.md` and `COVERAGE.md`; the last conflicts with intentional chat retention. No new OAuth regression was observed and no unrelated assertion or source behavior was changed. The full smoke suite is **not** reported as passing.
+
+The complete chain ran with `PATH=/Users/vanshkumar/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH node /Users/vanshkumar/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/pnpm/bin/pnpm.cjs run test`; the same Node PATH was used for the individual smoke checks, package builders and validators. No package installation was needed. The fixture-provider and JSDOM results above do not establish actual Chrome identity, Google consent, account continuity or elapsed seven-day behavior.
+
+**Owner gate remains open:** real Chrome ID/redirect, second-location identity, both Console registrations, permitted managed-profile fallback and live revoked/expired-grant recovery remain pending. No browser profile or existing installation was changed. Follow sections 2–4 with the friends hash above, and report only sanitized outcomes and any replacement public client IDs. Any client-ID change requires both packages and their recorded hashes to be regenerated before continuing acceptance.
 
 ## 2. Preserve the current installation and observe Chrome identity
 
@@ -72,7 +104,7 @@ Record date, profile type (personal/managed/clean test, no account identifier), 
 | Check | Status | Date / profile type / build SHA-256 / outcome |
 | --- | --- | --- |
 | Old-ID work/settings retention inventory; original install preserved | pending | pending |
-| Final standard and friends archives inspected and hashed | pending | pending |
+| Final standard and friends archives inspected and hashed | passed | 2026-09-24 UTC / automated, no browser profile / standard `6d2816a47fb918d6f57fa2914b6e16316997e7e2d30b902af0c710d30c76fe75`; friends `5dd2a53b5a6d559cff68f8ffc36352f33d6693929316eaa8a5b20eb2b4dba730` / both extracted trees validated; details in section 1 |
 | Real Chrome ID + exact redirect match prepared public values | pending | pending |
 | Same ID/redirect after reload and second directory/profile or machine | pending | pending |
 | Chrome Extension client Item ID confirmed by owner | pending | pending |
