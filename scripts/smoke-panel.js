@@ -89,6 +89,7 @@ const dom = new JSDOM(html, {
     window.chrome = chrome;
     Object.defineProperty(window, "crypto", { value: webcrypto });
     window.fetch = async (url, options) => {
+      if (googleAuthOnly && url.includes("/oauth2/v3/userinfo")) return { ok: true, status: 200, json: async () => ({ email: "selected@example.test", email_verified: true }) };
       if (googleAuthOnly && url.startsWith("https://docs.googleapis.com/")) {
         authEffects.push(["docs", options]);
         if (docStatus === "offline") throw new Error("PRIVATE offline failure");
@@ -215,6 +216,9 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
     await sleep(100);
     check("explicit disconnect clears state despite offline revocation", $("google-btn").textContent === "connect G" && !store.googleWebToken && store.googleAuthState.selectedDoor === null);
     authEffects.length = 0;
+    const disconnectedProbe = await window.FA.google.isConnected();
+    try { await window.FA.google.getDoc("after-disconnect"); } catch (e) { failure = e; }
+    check("disconnected feature activity cannot silently restore connection", disconnectedProbe === false && failure?.category === "authorization" && authEffects.length === 0 && store.googleAuthState.status === "disconnected");
     check("disconnected reload neither probes nor reconnects", await reloadedChip() === "connect G" && authEffects.length === 0);
     await chrome.storage.local.set({ googleAuthState: { version: 1, status: "reconnect", selectedDoor: "web", everConnected: true, reason: "authorization" } });
     await sleep(30);

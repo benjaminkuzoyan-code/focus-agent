@@ -147,13 +147,14 @@ test('web states differ between attempts and error callbacks also require state'
 });
 test('silent fallback and worker connect never escalate interaction', async () => {
   const h = harness({ chrome: disabled, web: webSuccess });
-  await h.google.getDoc('synthetic-doc');
+  await assert.rejects(h.google.getDoc('synthetic-doc'), e => e.category === 'policy_disabled');
   h.google.setInteractive(false);
-  await h.google.connect();
+  await assert.rejects(h.google.connect(), e => e.category === 'policy_disabled');
   assert.ok(h.effects.filter(e => ['chrome', 'web'].includes(e[0])).every(e => e[1].interactive === false));
 });
-test('expired legacy web token retains selected door and silent identity hint', async () => {
-  const h = harness({ store: { googleWebToken: { access_token: 'expired', expires_at: 1, email: 'prior@example.test' } }, web: webSuccess });
+test('expired verified web token retains selected door and silent identity hint', async () => {
+  const h = harness({ store: { googleWebToken: { access_token: 'expired', expires_at: 1, email: 'prior@example.test', emailVerified: true } }, web: webSuccess,
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({ email: 'prior@example.test', email_verified: true }) }) });
   assert.equal((await h.google.status()).selectedDoor, 'web');
   assert.equal((await h.google.status()).status, 'disconnected');
   assert.equal(h.effects.length, 0);
@@ -168,8 +169,8 @@ test('explicit web selection cannot retain stale email when userinfo is absent',
   assert.equal(h.store.googleWebToken.email, '');
 });
 test('silent conflicting account hint is rejected without adopting new credentials', async () => {
-  const h = harness({ store: { googleWebToken: { access_token: 'old', expires_at: 1, email: 'prior@example.test' } }, web: webSuccess,
-    fetch: async () => ({ ok: true, status: 200, json: async () => ({ email: 'different@example.test' }) }) });
+  const h = harness({ store: { googleWebToken: { access_token: 'old', expires_at: 1, email: 'prior@example.test', emailVerified: true } }, web: webSuccess,
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({ email: 'different@example.test', email_verified: true }) }) });
   await assert.rejects(h.google.getDoc('synthetic-doc'), e => e.category === 'authorization');
   assert.equal(h.store.googleWebToken.access_token, 'old');
   assert.equal(h.effects.filter(e => e[0] === 'fetch' && e[1].includes('docs.googleapis.com')).length, 0);
@@ -216,8 +217,8 @@ test('Drive bytes share one silent 401 retry and preserve binary data', async ()
 });
 test('saved web 401 retains chosen door and identity hint during renewal', async () => {
   let n = 0;
-  const h = harness({ store: { googleAuthState: connected('web'), googleWebToken: { access_token: 'old', expires_at: Date.now() + 3600000, email: 'chosen@example.test' } }, web: webSuccess,
-    fetch: async url => url.includes('userinfo') ? response() : response(++n === 1 ? 401 : 200) });
+  const h = harness({ store: { googleAuthState: connected('web'), googleWebToken: { access_token: 'old', expires_at: Date.now() + 3600000, email: 'chosen@example.test', emailVerified: true } }, web: webSuccess,
+    fetch: async url => url.includes('userinfo') ? { ...response(), json: async () => ({ email: 'chosen@example.test', email_verified: true }) } : response(++n === 1 ? 401 : 200) });
   await h.google.getDoc('doc');
   assert.equal(h.effects.filter(e => e[0] === 'chrome').length, 0);
   assert.equal(new URL(h.effects.find(e => e[0] === 'web')[1].url).searchParams.get('login_hint'), 'chosen@example.test');
@@ -347,7 +348,7 @@ for (const mode of ['missing-binding', 'userinfo-denied', 'unverified-email']) t
   assert.equal(h.store.googleAuthState.status, 'connected');
 });
 test('CR-02 usable cached web token needs no optional identity metadata', async () => {
-  const h = harness({ store: { googleAuthState: connected('web'), googleWebToken: { access_token: 'chosen-A', expires_at: Date.now() + 3600000, email: '' } } });
+  const h = harness({ store: { googleAuthState: connected('web'), googleWebToken: { access_token: 'chosen-A', expires_at: Date.now() + 30000, email: '' } } });
   await h.google.getDoc('doc');
   assert.equal(h.effects.filter(e => ['chrome', 'web'].includes(e[0])).length, 0);
   assert.equal(h.effects.find(e => e[0] === 'fetch')[2].headers.Authorization, 'Bearer chosen-A');
