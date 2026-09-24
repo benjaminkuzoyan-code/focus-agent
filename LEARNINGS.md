@@ -5,6 +5,11 @@
 - Action: Pull from the configured upstream when syncing this checkout; use fast-forward pulls to preserve local history.
 - Confidence: high
 
+**2026-09-24 — Google recovery integration**
+- Observation: Feature callers use `FA.google.isConnected()` before bearer API calls, and a reloaded panel has no in-memory Chrome token descriptor. Updating only request recovery misses preflight reconnect status and reload-time cache cleanup.
+- Action: Preserve auth-status propagation in silent preflight probes and test disconnect against persisted Chrome status in a fresh module context.
+- Confidence: high
+
 **2026-09-24 — GSD initialization check**
 - Observation: `.planning/` already contains PROJECT.md, REQUIREMENTS.md, ROADMAP.md, and STATE.md. Its September 17 scope narrows the broader product spec to a Blackbaud pilot, prioritizing OAuth and coach hosting (hosting changed to Fly.io on September 24).
 - Action: Resume the existing GSD project with `gsd-progress`; preserve its pilot scope when consulting `docs/SPEC.md`.
