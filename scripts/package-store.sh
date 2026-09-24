@@ -60,6 +60,9 @@ for ref in $(grep -ohE '"(viewer|offscreen|sidepanel|popup|annotate|overlay)/[A-
   [ -e "$STAGE/$ref" ] || { echo "FAIL: code references $ref but it is not in the build" >&2; exit 1; }
 done
 
+# Fail closed on identity/configuration drift or staged private credentials.
+node "$ROOT/scripts/test-oauth-package.js" --stage "$STAGE"
+
 # 5. Zip it.
 mkdir -p "$DIST"
 VERSION=$(python3 -c "import json; print(json.load(open('$STAGE/manifest.json'))['version'])")

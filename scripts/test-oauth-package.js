@@ -8,6 +8,82 @@ const { spawnSync } = require('node:child_process');
 const ROOT = path.resolve(__dirname, '..');
 const EXPECTED_ID = 'hamjokekeddfckjjfmciillddifhdeda';
 
+function publicDer(value) {
+  try {
+    if (typeof value !== 'string' || !value.length || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) throw new Error();
+    const der = Buffer.from(value, 'base64');
+    if (der.toString('base64') !== value) throw new Error();
+    const key = crypto.createPublicKey({ key: der, format: 'der', type: 'spki' });
+    if (key.asymmetricKeyType !== 'rsa' || !key.export({ format: 'der', type: 'spki' }).equals(der)) throw new Error();
+    return der;
+  } catch { throw new Error('Expected canonical public RSA SPKI key'); }
+}
+
+function deriveExtensionId(value) {
+  return crypto.createHash('sha256').update(publicDer(value)).digest('hex').slice(0, 32)
+    .replace(/[0-9a-f]/g, digit => String.fromCharCode(97 + parseInt(digit, 16)));
+}
+
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch { throw new Error(`Invalid or unreadable JSON: ${file}`); }
+}
+
+function hasSecretField(value) {
+  if (!value || typeof value !== 'object') return false;
+  return Object.entries(value).some(([key, child]) => /^(client[_-]?secret|private[_-]?key)$/i.test(key) || hasSecretField(child));
+}
+
+function validatePackageTree(directory) {
+  const stage = path.resolve(directory);
+  const files = [];
+  // Reject links before reading: scanning must never follow an unexpected secret
+  // outside the test/build-owned tree (including a symlinked manifest).
+  function scan(dir) {
+    if (!fs.lstatSync(dir).isDirectory()) throw new Error(`Directory required (no symlinks): ${dir}`);
+    for (const name of fs.readdirSync(dir)) {
+      const file = path.join(dir, name);
+      const stat = fs.lstatSync(file);
+      if (stat.isSymbolicLink()) throw new Error(`Forbidden symlink: ${file}`);
+      if (stat.isDirectory()) { scan(file); continue; }
+      if (!stat.isFile()) throw new Error(`Unsupported staged file: ${file}`);
+      if (/\.pem$/i.test(name) || /^\.env(?:\.|$)/i.test(name) || /^(api_key|tokens)$/i.test(name)) {
+        throw new Error(`Forbidden credential file: ${file}`);
+      }
+      const content = fs.readFileSync(file, 'utf8');
+      if (/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/.test(content)
+          || /\bclient[_-]?secret\b["']?\s*[:=]/i.test(content)
+          || (/\.json$/i.test(name) && hasSecretField(readJson(file)))) {
+        throw new Error(`Forbidden credential content: ${file}`);
+      }
+      files.push(file);
+    }
+  }
+  scan(stage);
+  const source = readJson(path.join(ROOT, 'manifest.json'));
+  const manifestPath = path.join(stage, 'manifest.json');
+  const staged = readJson(manifestPath);
+  const extensionId = deriveExtensionId(source.key);
+  if (extensionId !== EXPECTED_ID || deriveExtensionId(staged.key) !== extensionId
+      || !publicDer(source.key).equals(publicDer(staged.key))) throw new Error(`Public identity mismatch: ${manifestPath}`);
+  const expected = structuredClone(source);
+  expected.host_permissions = (expected.host_permissions || []).filter(h => !/localhost|127\.0\.0\.1/.test(h));
+  if (!expected.host_permissions.length) delete expected.host_permissions;
+  for (const script of expected.content_scripts || []) script.matches = (script.matches || []).filter(h => !/localhost|127\.0\.0\.1/.test(h));
+  try { assert.deepEqual(staged, expected); }
+  catch { throw new Error(`Unexpected staged manifest configuration: ${manifestPath}`); }
+  function webClient(file) {
+    const match = fs.readFileSync(file, 'utf8').match(/const WEB_CLIENT_ID\s*=\s*"([^"]+)"/);
+    if (!match) throw new Error(`Missing public web client: ${file}`);
+    return match[1];
+  }
+  const stagedGoogle = path.join(stage, 'lib/google.js');
+  if (webClient(stagedGoogle) !== webClient(path.join(ROOT, 'lib/google.js'))) throw new Error(`Changed public web client: ${stagedGoogle}`);
+  return { extensionId, files: files.length };
+}
+
+module.exports = { deriveExtensionId, validatePackageTree };
+
 function runTests() {
   const source = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
   const google = fs.readFileSync(path.join(ROOT, 'lib/google.js'), 'utf8');

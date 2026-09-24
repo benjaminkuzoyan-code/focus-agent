@@ -4,7 +4,7 @@
   "private": true,
   "description": "Focus Agent: a Chrome side-panel coach that reads a student's school portal and helps them start homework. Tutor, never a ghostwriter.",
   "scripts": {
-    "test": "python3 scripts/security_tests.py && node scripts/test-panel-boundary.js && node scripts/test-background.js && node scripts/test-docops.js",
+    "test": "python3 scripts/security_tests.py && node scripts/test-panel-boundary.js && node scripts/test-background.js && node scripts/test-docops.js && node scripts/test-google-auth.js && node scripts/test-oauth-package.js",
     "smoke": "node scripts/smoke-panel.js && node scripts/smoke-toolbar.js",
     "package": "bash scripts/package-store.sh",
     "package:friends": "bash scripts/package-store.sh --friends"
