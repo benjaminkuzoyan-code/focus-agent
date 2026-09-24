@@ -319,6 +319,52 @@ test('disconnect after Chrome reload evicts the silently recovered cached token'
   assert.ok(h.effects.filter(e => e[0] === 'chrome').every(e => e[1].interactive === false));
   assert.equal((await h.google.status()).status, 'disconnected');
 });
+test('CR-01 explicit disconnect blocks future probes and features through reload', async () => {
+  const h = harness({ store: { googleAuthState: connected() }, fetch: async url => { if (url.includes('revoke')) throw new Error('offline'); return response(); } });
+  await h.google.disconnect();
+  for (const current of [h, harness({ store: h.store })]) {
+    current.effects.length = 0;
+    assert.equal(await current.google.isConnected(), false);
+    await assert.rejects(current.google.getDoc('after-disconnect'), e => e.category === 'authorization');
+    assert.equal((await current.google.status()).status, 'disconnected');
+    assert.equal(current.effects.filter(e => ['chrome', 'web', 'fetch'].includes(e[0])).length, 0);
+  }
+  await h.google.connect();
+  assert.equal((await h.google.getDoc('explicitly-connected')).title, 'Recovered');
+  assert.equal((await h.google.status()).status, 'connected');
+});
+for (const mode of ['missing-binding', 'userinfo-denied', 'unverified-email']) test('CR-02 silent web renewal rejects ' + mode, async () => {
+  const old = { access_token: 'chosen-A', expires_at: 1, email: mode === 'missing-binding' ? '' : 'chosen@example.test', emailVerified: mode !== 'missing-binding' };
+  const h = harness({ store: { googleAuthState: connected('web'), googleWebToken: old }, web: webSuccess,
+    fetch: async url => url.includes('userinfo') ? { ...response(mode === 'userinfo-denied' ? 403 : 200), json: async () => ({ email: 'chosen@example.test', email_verified: false }) } : response() });
+  await assert.rejects(h.google.getDoc('private-doc'), e => e.category === 'authorization');
+  assert.equal(h.store.googleWebToken.access_token, 'chosen-A');
+  assert.equal(h.store.googleAuthState.status, 'reconnect');
+  assert.equal(h.effects.filter(e => e[0] === 'fetch' && e[1].includes('docs.googleapis.com')).length, 0);
+  assert.equal(h.effects.filter(e => e[0] === 'chrome').length, 0);
+  await h.google.connect();
+  await h.google.getDoc('deliberately-chosen');
+  assert.equal(h.store.googleAuthState.status, 'connected');
+});
+test('CR-02 usable cached web token needs no optional identity metadata', async () => {
+  const h = harness({ store: { googleAuthState: connected('web'), googleWebToken: { access_token: 'chosen-A', expires_at: Date.now() + 3600000, email: '' } } });
+  await h.google.getDoc('doc');
+  assert.equal(h.effects.filter(e => ['chrome', 'web'].includes(e[0])).length, 0);
+  assert.equal(h.effects.find(e => e[0] === 'fetch')[2].headers.Authorization, 'Bearer chosen-A');
+});
+test('CR-03 stale preflight failure cannot overwrite newer authenticated success', async () => {
+  let finish, count = 0;
+  const h = harness({ store: { googleAuthState: connected() }, chrome: (_, cb, chrome) => {
+    if (++count === 1) finish = () => identityFailure('OAuth2 not granted or revoked.')({}, cb, chrome);
+    else cb('newer-token');
+  }, web: oauthFailure('login_required') });
+  const old = h.google.isConnected();
+  await new Promise(resolve => setImmediate(resolve));
+  await h.google.getDoc('new-success');
+  finish();
+  assert.equal(await old, false);
+  assert.equal(h.store.googleAuthState.status, 'connected');
+});
 test('silent connection probe records confirmed authorization failure', async () => {
   const h = harness({ store: { googleAuthState: connected('web') }, web: oauthFailure('login_required') });
   assert.equal(await h.google.isConnected(), false);
