@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v0.8.21
 current_phase: 1
 current_phase_name: Stable Extension ID + OAuth Hardening
-status: planning
-stopped_at: Session paused mid-plan-phase-1 to reprioritize around pilot-readiness; roadmap/requirements updated, no code changed yet
-last_updated: "2026-09-24T23:15:20.611Z"
+status: executing
+stopped_at: Completed 01-01-PLAN.md
+last_updated: "2026-09-24T23:27:31.451Z"
 last_activity: 2026-09-24
-last_activity_desc: Switched Phase 1.5 hosting to Fly.io per user direction; Phase 1 remains ready to plan and other scope is unchanged
-state_head: f1926c586a7b4fbde9c92c0ca5d433fa679baea4
+last_activity_desc: Phase 1 execution started
+state_head: 207a4b6fe81478b58133b6534d472f58916fb411
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 4
-  completed_plans: 0
+  completed_plans: 1
 ---
 
 # Project State
@@ -23,15 +23,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-17)
 
 **Core value:** One tap (Smart Start) gets a student from "can't start" to "working, with structure they can't talk their way out of, and a tutor beside them that never ghostwrites."
-**Current focus:** Phase 1 — Stable Extension ID + OAuth Hardening, then Phase 1.5 — Fly.io Coach Hosting + Pilot Smoke Test. (Phases 2-5 are deferred until after the first pilot wave — see ROADMAP.md Overview.)
+**Current focus:** Phase 1 — Stable Extension ID + OAuth Hardening
 
 ## Current Position
 
-Phase: 1 (Stable Extension ID + OAuth Hardening) — READY TO EXECUTE
+Phase: 1 (Stable Extension ID + OAuth Hardening) — EXECUTING
 Next up after Phase 1: Phase 1.5 (Fly.io Coach Hosting + Pilot Smoke Test) — roadmapped, not yet discussed/planned
-Plan: 0 of TBD in current phase
-Status: Ready to plan (see "Resuming this project" below before running plan-phase)
-Last activity: 2026-09-24 — Switched Phase 1.5 hosting to Fly.io; Phase 1 still ready to plan.
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-09-24 — Phase 1 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -65,6 +65,11 @@ This project uses **GSD** (a structured planning/build workflow: discuss → pla
 - Trend: -
 
 *Updated after each plan completion*
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 01 P01 | 12min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -79,6 +84,7 @@ Recent decisions affecting current work:
 - **2026-09-17:** two bugs found by code review during Phase 1 planning, deferred (not fixed) per Ben's choice — see PROJECT.md Context "Known issues": (1) 📸 button text-overflow when no assignment is open, (2) 🖍 highlighter's ≡ summarize ignores the graded-annotation rule (this is COACH-02).
 - Roadmap (original, still governs Phases 2-5 order when resumed): OAuth stability first (blocks all other Google-dependent work), then Canvas/Classroom read access, then cadence/coach/finish-moment UI (decoupled, sequenced by priority), then Aeries adapter (depends on Phase 2's adapters existing for fixture coverage), then the rest of real-device QA (gated last).
 - Roadmap: No phase schedules blocking-tier distraction handling (ENGAGE-01) — explicitly gated on Ben's undecided conversation with his dad, deferred to v2 per REQUIREMENTS.md.
+- [Phase 1]: Permanent public manifest key derives extension ID hamjokekeddfckjjfmciillddifhdeda; do not rotate the ignored local signing key.
 
 ### Pending Todos
 
@@ -104,7 +110,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-17T23:42:59.020Z
-Stopped at: Reprioritized around pilot-readiness (see "Resuming This Project" above); Phase 1 still has only CONTEXT.md, no PLAN.md — nothing was executed/coded this session
-Resume file: .planning/phases/01-stable-extension-id-oauth-hardening/01-CONTEXT.md
+Last session: 2026-09-24T23:27:31.441Z
+Stopped at: Completed 01-01-PLAN.md
+Resume file: None
 Next command: /gsd-progress (to confirm state), then /gsd-plan-phase 1
