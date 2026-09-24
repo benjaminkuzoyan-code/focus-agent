@@ -312,6 +312,18 @@ test('offline revocation still clears local connection and credentials', async (
   assert.equal((await h.google.status()).status, 'disconnected');
   assert.equal((await h.google.status()).selectedDoor, null);
 });
+test('disconnect after Chrome reload evicts the silently recovered cached token', async () => {
+  const h = harness({ store: { googleAuthState: connected() }, fetch: async () => { throw new Error('offline'); } });
+  await h.google.disconnect();
+  assert.deepEqual(h.effects.filter(e => e[0] === 'forget').map(e => e[1].token), ['synthetic-chrome-token']);
+  assert.ok(h.effects.filter(e => e[0] === 'chrome').every(e => e[1].interactive === false));
+  assert.equal((await h.google.status()).status, 'disconnected');
+});
+test('silent connection probe records confirmed authorization failure', async () => {
+  const h = harness({ store: { googleAuthState: connected('web') }, web: oauthFailure('login_required') });
+  assert.equal(await h.google.isConnected(), false);
+  assert.equal(h.store.googleAuthState.status, 'reconnect');
+});
 
 (async () => {
   let passed = 0;
