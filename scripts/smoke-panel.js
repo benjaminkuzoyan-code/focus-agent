@@ -10,6 +10,8 @@ const { webcrypto } = require("node:crypto");
 const googleAuthOnly = process.argv.includes("--google-auth");
 const authEffects = [];
 let authDoor = "chrome";
+let authFailure = null;
+let docStatus = 200;
 
 const ROOT = path.resolve(__dirname, "..");
 const html = fs.readFileSync(path.join(ROOT, "sidepanel/panel.html"), "utf8");
@@ -69,7 +71,8 @@ const chrome = {
     launchWebAuthFlow(o, cb) {
       authEffects.push(["web", o]);
       const request = new URL(o.url);
-      cb(googleAuthOnly ? "https://synthetic.chromiumapp.org/#" + new URLSearchParams({ state: request.searchParams.get("state"), access_token: "synthetic-web-token", token_type: "Bearer", expires_in: "3600" }) : undefined);
+      const fields = authFailure ? { error: authFailure } : { access_token: "synthetic-web-token", token_type: "Bearer", expires_in: "3600" };
+      cb(googleAuthOnly ? "https://synthetic.chromiumapp.org/#" + new URLSearchParams({ state: request.searchParams.get("state"), ...fields }) : undefined);
     },
     removeCachedAuthToken(o, cb) { authEffects.push(["forget", o]); cb(); },
   },
@@ -88,7 +91,8 @@ const dom = new JSDOM(html, {
     window.fetch = async (url, options) => {
       if (googleAuthOnly && url.startsWith("https://docs.googleapis.com/")) {
         authEffects.push(["docs", options]);
-        return { ok: true, status: 200, json: async () => ({ documentId: "synthetic-doc", title: "Auth tracer" }) };
+        if (docStatus === "offline") throw new Error("PRIVATE offline failure");
+        return { ok: docStatus === 200, status: docStatus, json: async () => ({ documentId: "synthetic-doc", title: "Auth tracer", error: { message: "PRIVATE provider failure" } }) };
       }
       throw new Error("offline");
     };
@@ -145,6 +149,7 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
     check("actual Chrome tracer authenticates Docs", doc.title === "Auth tracer" && authEffects.find(e => e[0] === "docs")?.[1].headers.Authorization === "Bearer synthetic-chrome-token");
     authEffects.length = 0;
     // Boot a second actual panel with fresh script globals and the persisted store.
+    async function reloadedChip() {
     const reopened = new JSDOM(html, {
       url: "chrome-extension://test/sidepanel/panel.html", runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc,
       beforeParse(w) {
@@ -159,9 +164,12 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
     const listenerCount = changeListeners.length;
     for (const src of srcs) reopened.window.eval(fs.readFileSync(path.join(ROOT, "sidepanel", src), "utf8"));
     await sleep(1800);
-    check("persisted status renders after reload without identity calls", reopened.window.document.getElementById("google-btn").textContent === "G ✓ connected" && authEffects.length === 0);
+    const label = reopened.window.document.getElementById("google-btn").textContent;
     changeListeners.splice(listenerCount);
     reopened.window.close();
+    return label;
+    }
+    check("persisted status renders after reload without identity calls", await reloadedChip() === "G ✓ connected" && authEffects.length === 0);
     await chrome.storage.local.set({ googleAuthState: { version: 1, status: "disconnected", selectedDoor: null, everConnected: true, reason: null } });
     await sleep(30);
     check("storage notification updates actual chip", $("google-btn").textContent === "connect G");
@@ -173,8 +181,50 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
     check("disabled Chrome opens exactly one personal chooser", authEffects.filter(e => e[0] === "chrome").length === 1 && authEffects.filter(e => e[0] === "web" && e[1].interactive).length === 1);
     await window.FA.google.getDoc("synthetic-doc");
     check("actual personal-account tracer authenticates Docs", authEffects.find(e => e[0] === "docs")?.[1].headers.Authorization === "Bearer synthetic-web-token");
+    docStatus = 401;
+    authEffects.length = 0;
+    let failure;
+    try { await window.FA.google.getDoc("synthetic-doc"); } catch (e) { failure = e; }
+    await sleep(50);
+    check("terminal feature failure renders accessible Reconnect Google", failure?.category === "authorization" && $("google-btn").textContent === "Reconnect Google" && $("google-btn").getAttribute("aria-label") === "Reconnect Google" && $("google-btn").title.includes("consent") && $("google-note").textContent.includes("pilot"));
+    check("feature failure retries once without interactive escalation", authEffects.filter(e => e[0] === "docs").length === 2 && authEffects.filter(e => e[0] === "web").every(e => !e[1].interactive));
+    authEffects.length = 0;
+    check("reconnect persists across actual panel reload without identity probes", await reloadedChip() === "Reconnect Google" && authEffects.length === 0);
+    authFailure = "access_denied";
+    const priorNotice = $("forecast-headline").textContent;
+    $("google-btn").click(); $("google-btn").click();
+    await sleep(100);
+    check("cancelled reconnect stays reconnect without scary copy or duplicate chooser", $("google-btn").textContent === "Reconnect Google" && $("forecast-headline").textContent === priorNotice && authEffects.filter(e => e[0] === "web" && e[1].interactive).length === 1);
+    authFailure = "network offline";
+    $("google-btn").click();
+    await sleep(100);
+    check("offline reconnect offers retry while retaining reconnect state", $("google-btn").textContent === "Reconnect Google" && /connection.*try again/i.test($("forecast-headline").textContent));
+    authFailure = null; docStatus = 200; authEffects.length = 0;
+    $("google-btn").click(); $("google-btn").click();
+    await sleep(100);
+    const recovered = await window.FA.google.getDoc("synthetic-doc");
+    check("explicit reconnect restores real-module Docs access and clears marker", recovered.title === "Auth tracer" && store.googleAuthState.status === "connected" && store.googleAuthState.reason === null && $("google-btn").textContent === "G ✓ connected" && authEffects.filter(e => e[0] === "web" && e[1].interactive).length === 1);
+    for (const [code, category] of [[403, "resource"], ["offline", "network"]]) {
+      docStatus = code;
+      try { await window.FA.google.getDoc("synthetic-doc"); } catch (e) { failure = e; }
+      await sleep(30);
+      check(`${category} feature failure never invents expiry or leaks provider text`, failure.category === category && $("google-btn").textContent === "G ✓ connected" && !window.document.body.textContent.includes("PRIVATE"));
+    }
+    window.confirm = () => true;
+    $("google-btn").click();
+    await sleep(100);
+    check("explicit disconnect clears state despite offline revocation", $("google-btn").textContent === "connect G" && !store.googleWebToken && store.googleAuthState.selectedDoor === null);
+    authEffects.length = 0;
+    check("disconnected reload neither probes nor reconnects", await reloadedChip() === "connect G" && authEffects.length === 0);
+    await chrome.storage.local.set({ googleAuthState: { version: 1, status: "reconnect", selectedDoor: "web", everConnected: true, reason: "authorization" } });
+    await sleep(30);
+    await chrome.storage.local.remove("googleAuthState");
+    await sleep(30);
+    check("status deletion rerenders without an identity or storage loop", $("google-btn").textContent === "connect G" && authEffects.length === 0);
     check("real panel scripts loaded without errors", errors.length === 0, errors.join(" | "));
     console.log(results.join("\n"));
+    results.forEach((r, i) => console.log(`${r.startsWith("✓") ? "ok" : "not ok"} ${i + 1} - ${r.slice(2)}`));
+    console.log(`1..${results.length}\n# tests ${results.length}\n# pass ${results.filter(r => r.startsWith("✓")).length}\n# fail ${results.filter(r => r.startsWith("✗")).length}`);
     const ok = results.length > 0 && !results.some(r => r.startsWith("✗"));
     console.log(`${results.length} executed Google auth smoke cases`);
     console.log(ok ? "GOOGLE AUTH PASSED" : "GOOGLE AUTH FAILED");
