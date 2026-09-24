@@ -3888,42 +3888,49 @@ $("annotate-btn").addEventListener("click", async () => {
   }
 });
 
-// G chip: connect / show Google status. Token lives in Chrome, not in us.
+// G chip reads shared display state; credentials belong to the Google module.
+let googleConnectPending = false;
 async function renderGoogleChip() {
+  const state = await FA.google.status();
   const acct = await FA.google.account().catch(() => null);
   const chip = $("google-btn");
-  chip.textContent = acct ? "G ✓ connected" : "connect G";
+  chip.textContent = googleConnectPending ? "G…" : state.status === "connected" ? "G ✓ connected" : "connect G";
   chip.title = acct ? "Google connected (Docs + Calendar). Click to disconnect." : "Connect Google (Docs + Calendar)";
-  $("google-note").textContent = acct?.email ? acct.email : acct ? "Chrome account" : "";
+  $("google-note").textContent = acct?.email ? acct.email : acct ? (acct.door === "web" ? "Google account" : "Chrome account") : "";
 }
 $("google-btn").addEventListener("click", async () => {
+  if (googleConnectPending) return;
+  googleConnectPending = true;
   const chip = $("google-btn");
-  if (await FA.google.isConnected()) {
+  try {
+  if ((await FA.google.status()).status === "connected") {
     if (confirm("Disconnect Google from Focus Agent?")) await FA.google.disconnect();
   } else {
     chip.textContent = "G…";
     try {
       await FA.google.connect();
     } catch (e) {
-      console.warn("[Focus Agent] Google connect failed:", e.message);
-      const msg = /disabled for this account/i.test(e.message)
-        ? "Your school account blocks this. Google's account picker should have opened so you can choose a personal Gmail — if it didn't, the web client isn't configured yet."
-        : /not signed in/i.test(e.message)
-        ? "Chrome itself isn't signed in to a Google account. Click your profile icon (top-right of Chrome) → sign in, then try again."
-        : /bad client id|invalid_client|OAuth2 not granted|manifest/i.test(e.message)
-          ? `Google rejected the client id (${e.message}). Try again shortly.`
-          : `Google sign-in failed: ${e.message}`;
+      if (e.category === "cancelled") return;
+      const msg = e.category === "policy_disabled"
+        ? "Google sign-in is restricted. Use only an account your school permits and documents it can access."
+        : e.category === "configuration" ? "Google sign-in needs setup. Ask the person who installed Focus Agent."
+        : e.category === "network" ? "Google couldn't connect. Check your connection and try again."
+        : "Google sign-in didn't finish. Try connecting again.";
       sourceNotice = "⚠️ " + msg;
       $("forecast-headline").textContent = sourceNotice;
     }
   }
-  renderGoogleChip();
+  } finally {
+    googleConnectPending = false;
+    await renderGoogleChip();
+  }
 });
 
 // The selection toolbar (on pages) and the worker's detectors append to the
 // assignment's thread; pick that up live instead of waiting for a re-open.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
+  if (changes.googleAuthState) renderGoogleChip();
   if (changes.assignmentMeta && current) {
     const m = changes.assignmentMeta.newValue?.[current.assignment.id];
     const thread = Array.isArray(m?.thread) ? m.thread : null;
