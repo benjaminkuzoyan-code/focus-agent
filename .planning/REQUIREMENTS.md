@@ -18,10 +18,10 @@
 
 ### INFRA (coach server, real for the pilot) — 🎯 pilot-critical
 
-- [ ] **INFRA-01**: The coach server runs for real — a real Anthropic API key (`ANTHROPIC_API_KEY` or `~/.focus-agent/api_key`), hosted on Ben's Mac mini (`FA_HOST=0.0.0.0`), exposed to the internet via a Cloudflare Tunnel, with one access code minted per pilot friend (`FA_TOKENS` / the `token` CLI helper)
-- [ ] **INFRA-02**: The per-code daily call cap's behavior across a Mac-mini restart is a deliberate, documented decision (not an accident) — the in-memory cap resets on any process restart, which is a different failure mode than Fly.io's scale-to-zero but needs the same explicit call
+- [ ] **INFRA-01**: The coach server runs on Fly.io with a real Anthropic API key configured as a secret (`ANTHROPIC_API_KEY`), reachable over HTTPS, with one access code minted per pilot friend (`FA_TOKENS` / the `token` CLI helper).
+- [ ] **INFRA-02**: The per-code daily call cap behavior across Fly.io process restarts, deploys, and machine stop/start is a deliberate, documented decision. Choose whether to accept in-memory resets for the pilot or persist usage, and explicitly decide the always-on versus auto-stop policy.
 
-**Decided 2026-09-17:** Mac mini + Cloudflare Tunnel + real API key, not the existing Fly.io `deploy/` scaffolding — see `.planning/PROJECT.md` Key Decisions for the reasoning. The Fly.io path stays available for later if the pilot outgrows one machine.
+**Decided 2026-09-24:** Use Fly.io for now, reusing the existing `deploy/` scaffolding. This supersedes the September 17 Mac mini + Cloudflare Tunnel decision; the rest of the pilot scope is unchanged.
 
 ### PILOT (proof it actually works) — 🎯 pilot-critical
 

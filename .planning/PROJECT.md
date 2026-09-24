@@ -40,7 +40,7 @@ One tap (Smart Start) gets a student from "can't start" to "working, with struct
 
 **🎯 Pilot-critical (in progress now):**
 - [ ] Google OAuth actually works on a friend's own install: stable extension ID via manifest `key`, both Google OAuth clients (Chrome-Extension type + Web-application type) re-pointed to it, personal-Gmail fallback door confirmed working end to end. Confirmed broken today — see Key Decisions.
-- [ ] Coach server reachable for real: real Anthropic API key wired in, running on Ben's Mac mini, exposed via Cloudflare Tunnel, one access code minted per friend.
+- [ ] Coach server reachable for real: real Anthropic API key configured as a Fly.io secret, hosted on Fly.io, one access code minted per friend.
 - [ ] Core pilot loop verified live on Blackbaud with a real friend account: portal read → ranked list → Smart Start → focus clock → coach chat, end to end, not just unit-tested.
 
 **⏸ Deferred until after the first pilot wave (still real, still roadmapped):**
@@ -64,7 +64,7 @@ One tap (Smart Start) gets a student from "can't start" to "working, with struct
 
 ## Context
 
-- Chrome side-panel extension + a small Python (stdlib `http.server`) coach server (`bridge/coach_server.py`) that holds the AI key and never stores requests. Deploy scaffolding for Fly.io already exists in `deploy/` (Dockerfile, `fly.toml`, systemd unit, README) — **superseded for the pilot** by the Mac-mini + Cloudflare Tunnel plan (see Key Decisions); the Fly.io path may still be worth revisiting once the pilot outgrows one machine.
+- Chrome side-panel extension + a small Python (stdlib `http.server`) coach server (`bridge/coach_server.py`) that holds the AI key and never stores requests. Use the existing Fly.io scaffolding in `deploy/` (`Dockerfile`, `fly.toml`, README) for the pilot. The user selected Fly.io on 2026-09-24, superseding the earlier Mac mini + Cloudflare Tunnel approach.
 - Per-portal adapters are reverse-engineered, student-session-only API clients normalized into one assignment shape (`adapters/schema.js`); Blackbaud/myPoly is the only fully-proven one. **Pilot v1 assumes Blackbaud only** — Canvas/Classroom/Aeries friends wait for a later wave.
 - Pilot audience: Ben plus 4–5 friends he onboards in person. First wave is Blackbaud (Poly) only; Canvas/Classroom/Aeries friends are a later wave once those adapters are ready.
 - `docs/SPEC.md` is the source of truth for product behavior — reviewed by Ben by voice on 2026-09-13, with his direction marked 🎯 (decided) or 💬 (to discuss) inline. Code and tests are built to match it; this PROJECT.md and the roadmap should stay traceable back to it.
@@ -96,7 +96,7 @@ One tap (Smart Start) gets a student from "can't start" to "working, with struct
 | "Legal everywhere, with schools too" cuts any non-compliant feature outright | Protects pilot students from school action; non-negotiable per Ben | — Pending (governs all future scope decisions) |
 | Milestone reprioritized around "get pilot friends testing," Blackbaud-only for now | Ben's stated near-term goal; Canvas/Classroom/Aeries and Phase 3 UX polish (cadence, one-bubble coach, finish moment) don't block a first pilot wave | — Pending (decided 2026-09-17) |
 | Google OAuth fix (manifest `key` + re-pointing both OAuth clients) moved up to blocking priority | Confirmed during Phase 1 planning that neither OAuth door works for a friend's own install today — every friend gets a different Chrome extension ID, which neither registered OAuth client recognizes | — Pending (decided 2026-09-17, in progress) |
-| Coach server hosts on Ben's Mac mini behind a Cloudflare Tunnel with a real Anthropic API key, not Fly.io | Ben already has always-on hardware; Cloudflare Tunnel avoids port-forwarding/static-IP setup and needs no app install on friends' machines (unlike Tailscale). `bridge/coach_server.py` already supports this via `FA_HOST=0.0.0.0` + `ANTHROPIC_API_KEY`/`~/.focus-agent/api_key` + `FA_TOKENS`/minted per-friend codes | — Pending (decided 2026-09-17, in progress) |
+| Coach server hosts on Fly.io with a real Anthropic API key and per-friend access codes | User selected Fly.io for now on 2026-09-24, superseding the September 17 Mac mini + Cloudflare Tunnel decision; reuse existing `deploy/` scaffolding | — Pending implementation |
 
 ## Evolution
 
@@ -116,4 +116,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-17 after reprioritizing around pilot-readiness (Blackbaud-only, OAuth fix + Mac-mini coach hosting)*
+*Last updated: 2026-09-24 after switching pilot coach hosting to Fly.io; remaining scope unchanged*
