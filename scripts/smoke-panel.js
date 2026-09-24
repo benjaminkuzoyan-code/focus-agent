@@ -59,9 +59,18 @@ const chrome = {
   runtime: { async sendMessage() { return {}; }, getManifest: () => JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf8")), getURL: (p) => "chrome-extension://test/" + p },
   scripting: { async insertCSS() {}, async executeScript() {} },
   identity: {
-    getAuthToken(o, cb) { authEffects.push(["chrome", o]); cb(googleAuthOnly ? "synthetic-chrome-token" : undefined); },
+    getAuthToken(o, cb) {
+      authEffects.push(["chrome", o]);
+      if (authDoor === "web") chrome.runtime.lastError = { message: "Service has been disabled for this account." };
+      cb(googleAuthOnly && authDoor === "chrome" ? "synthetic-chrome-token" : undefined);
+      delete chrome.runtime.lastError;
+    },
     getRedirectURL: () => "https://synthetic.chromiumapp.org/",
-    launchWebAuthFlow(o, cb) { authEffects.push(["web", o]); cb(undefined); },
+    launchWebAuthFlow(o, cb) {
+      authEffects.push(["web", o]);
+      const request = new URL(o.url);
+      cb(googleAuthOnly ? "https://synthetic.chromiumapp.org/#" + new URLSearchParams({ state: request.searchParams.get("state"), access_token: "synthetic-web-token", token_type: "Bearer", expires_in: "3600" }) : undefined);
+    },
     removeCachedAuthToken(o, cb) { authEffects.push(["forget", o]); cb(); },
   },
   alarms: { create() {}, clear() {} },
@@ -142,6 +151,14 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
     await chrome.storage.local.set({ googleAuthState: { version: 1, status: "disconnected", selectedDoor: null, everConnected: true, reason: null } });
     await sleep(30);
     check("storage notification updates actual chip", $("google-btn").textContent === "connect G");
+    authDoor = "web";
+    authEffects.length = 0;
+    $("google-btn").click();
+    await sleep(100);
+    check("actual personal-account tracer persists and renders connected", store.googleAuthState?.selectedDoor === "web" && $("google-btn").textContent === "G ✓ connected");
+    check("disabled Chrome opens exactly one personal chooser", authEffects.filter(e => e[0] === "chrome").length === 1 && authEffects.filter(e => e[0] === "web" && e[1].interactive).length === 1);
+    await window.FA.google.getDoc("synthetic-doc");
+    check("actual personal-account tracer authenticates Docs", authEffects.find(e => e[0] === "docs")?.[1].headers.Authorization === "Bearer synthetic-web-token");
     check("real panel scripts loaded without errors", errors.length === 0, errors.join(" | "));
     console.log(results.join("\n"));
     const ok = results.length > 0 && !results.some(r => r.startsWith("✗"));
