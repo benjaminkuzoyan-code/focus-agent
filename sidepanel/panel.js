@@ -3894,9 +3894,13 @@ async function renderGoogleChip() {
   const state = await FA.google.status();
   const acct = await FA.google.account().catch(() => null);
   const chip = $("google-btn");
-  chip.textContent = googleConnectPending ? "G…" : state.status === "connected" ? "G ✓ connected" : "connect G";
-  chip.title = acct ? "Google connected (Docs + Calendar). Click to disconnect." : "Connect Google (Docs + Calendar)";
-  $("google-note").textContent = acct?.email ? acct.email : acct ? (acct.door === "web" ? "Google account" : "Chrome account") : "";
+  const reconnect = state.status === "reconnect";
+  chip.textContent = googleConnectPending ? "G…" : reconnect ? "Reconnect Google" : state.status === "connected" ? "G ✓ connected" : "connect G";
+  chip.setAttribute("aria-label", googleConnectPending ? "Connecting Google" : reconnect ? "Reconnect Google" : state.status === "connected" ? "Disconnect Google" : "Connect Google");
+  chip.title = reconnect ? "Reconnect Google (Docs + Calendar). The pilot may ask for consent again."
+    : acct ? "Google connected (Docs + Calendar). Click to disconnect." : "Connect Google (Docs + Calendar)";
+  $("google-note").textContent = reconnect ? "The pilot may ask for Google consent again. Click to reconnect."
+    : acct?.email ? acct.email : acct ? (acct.door === "web" ? "Google account" : "Chrome account") : "";
 }
 $("google-btn").addEventListener("click", async () => {
   if (googleConnectPending) return;
@@ -3915,6 +3919,8 @@ $("google-btn").addEventListener("click", async () => {
         ? "Google sign-in is restricted. Use only an account your school permits and documents it can access."
         : e.category === "configuration" ? "Google sign-in needs setup. Ask the person who installed Focus Agent."
         : e.category === "network" ? "Google couldn't connect. Check your connection and try again."
+        : e.category === "authorization" ? "Reconnect Google to continue. The pilot may ask for consent again."
+        : e.category === "resource" ? "This Google account can't access that file. Check which account the file is shared with."
         : "Google sign-in didn't finish. Try connecting again.";
       sourceNotice = "⚠️ " + msg;
       $("forecast-headline").textContent = sourceNotice;
