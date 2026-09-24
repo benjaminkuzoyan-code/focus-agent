@@ -6,6 +6,10 @@
  */const { JSDOM, VirtualConsole } = require("jsdom");
 const fs = require("fs");
 const path = require("path");
+const { webcrypto } = require("node:crypto");
+const googleAuthOnly = process.argv.includes("--google-auth");
+const authEffects = [];
+let authDoor = "chrome";
 
 const ROOT = path.resolve(__dirname, "..");
 const html = fs.readFileSync(path.join(ROOT, "sidepanel/panel.html"), "utf8");
@@ -33,7 +37,11 @@ const chrome = {
         Object.assign(store, obj);
         emit(changes);
       },
-      async remove(k) { (Array.isArray(k) ? k : [k]).forEach((x) => delete store[x]); },
+      async remove(k) {
+        const changes = {};
+        for (const x of Array.isArray(k) ? k : [k]) { changes[x] = { oldValue: store[x] }; delete store[x]; }
+        emit(changes);
+      },
     },
     onChanged: { addListener(fn) { changeListeners.push(fn); } },
   },
@@ -48,9 +56,14 @@ const chrome = {
     onActivated: { addListener() {} },
   },
   windows: { async create() { return { id: 2 }; }, async getCurrent() { return { id: 1 }; } },
-  runtime: { async sendMessage() { return {}; }, getManifest: () => ({ version: "test" }), getURL: (p) => "chrome-extension://test/" + p },
+  runtime: { async sendMessage() { return {}; }, getManifest: () => JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf8")), getURL: (p) => "chrome-extension://test/" + p },
   scripting: { async insertCSS() {}, async executeScript() {} },
-  identity: { getAuthToken: (o, cb) => cb && cb(undefined) },
+  identity: {
+    getAuthToken(o, cb) { authEffects.push(["chrome", o]); cb(googleAuthOnly ? "synthetic-chrome-token" : undefined); },
+    getRedirectURL: () => "https://synthetic.chromiumapp.org/",
+    launchWebAuthFlow(o, cb) { authEffects.push(["web", o]); cb(undefined); },
+    removeCachedAuthToken(o, cb) { authEffects.push(["forget", o]); cb(); },
+  },
   alarms: { create() {}, clear() {} },
 };
 const created = [];
@@ -62,7 +75,14 @@ const dom = new JSDOM(html, {
   virtualConsole: vc,
   beforeParse(window) {
     window.chrome = chrome;
-    window.fetch = async () => { throw new Error("offline"); };
+    Object.defineProperty(window, "crypto", { value: webcrypto });
+    window.fetch = async (url, options) => {
+      if (googleAuthOnly && url.startsWith("https://docs.googleapis.com/")) {
+        authEffects.push(["docs", options]);
+        return { ok: true, status: 200, json: async () => ({ documentId: "synthetic-doc", title: "Auth tracer" }) };
+      }
+      throw new Error("offline");
+    };
     window.confirm = () => false;
     window.navigator.clipboard = { writeText: async () => {} };
     window.scrollTo = () => {};
@@ -103,6 +123,33 @@ const visible = (id) => $(`view-${id}`).classList.contains("active");
 
   const results = [];
   const check = (name, ok, extra = "") => results.push(`${ok ? "✓" : "✗"} ${name}${extra ? " — " + extra : ""}`);
+
+  if (googleAuthOnly) {
+    check("clean boot shows disconnected without a chooser", $("google-btn").textContent === "connect G" && !authEffects.some(e => e[1]?.interactive));
+    authEffects.length = 0;
+    $("google-btn").click();
+    $("google-btn").click();
+    await sleep(100);
+    check("actual Chrome button tracer persists and renders connected", store.googleAuthState?.status === "connected" && $("google-btn").textContent === "G ✓ connected");
+    check("simultaneous actual clicks connect only once", authEffects.filter(e => e[0] === "chrome" && e[1].interactive).length === 1);
+    const doc = await window.FA.google.getDoc("synthetic-doc");
+    check("actual Chrome tracer authenticates Docs", doc.title === "Auth tracer" && authEffects.find(e => e[0] === "docs")?.[1].headers.Authorization === "Bearer synthetic-chrome-token");
+    authEffects.length = 0;
+    // Re-evaluate the real Google module and renderer as a reopened panel would.
+    window.eval(fs.readFileSync(path.join(ROOT, "lib/google.js"), "utf8"));
+    await window.eval("renderGoogleChip()");
+    check("persisted status renders after reload without identity calls", $("google-btn").textContent === "G ✓ connected" && authEffects.length === 0);
+    await chrome.storage.local.set({ googleAuthState: { version: 1, status: "disconnected", selectedDoor: null, everConnected: true, reason: null } });
+    await sleep(30);
+    check("storage notification updates actual chip", $("google-btn").textContent === "connect G");
+    check("real panel scripts loaded without errors", errors.length === 0, errors.join(" | "));
+    console.log(results.join("\n"));
+    const ok = results.length > 0 && !results.some(r => r.startsWith("✗"));
+    console.log(`${results.length} executed Google auth smoke cases`);
+    console.log(ok ? "GOOGLE AUTH PASSED" : "GOOGLE AUTH FAILED");
+    window.close();
+    process.exit(ok ? 0 : 1);
+  }
 
   const cards = window.document.querySelectorAll("#today-list .card");
   check("list renders cached assignments (fixture)", cards.length > 0, `${cards.length} cards`);
