@@ -89,6 +89,8 @@ Use an owned, disposable test document containing neutral sample text. Never use
 5. Attempt to read a known test resource that the selected account cannot access. Expect a resource-access failure; reconnecting should not be presented as granting new document permissions. Treat disabled APIs, wrong client/redirect and invalid configuration as setup problems to resolve in step 3, distinct from authorization lapse. Stop on policy denial rather than suggesting a workaround. Cancel a chooser once and confirm cancellation stays quiet and does not erase an existing connection.
 6. Verify explicit disconnect removes connected/reconnect status, then reconnect by tapping again. Record outcome, date, profile type, archive hash and a sanitized category. Do not record student emails, access tokens, callback URLs, document IDs/content, or screenshots with personal work.
 
+Silent web-token renewal is allowed only when the saved account identity is verified and the renewed token returns the same verified identity. The unchanged Docs/Drive/Calendar scopes may not return that identity information. In that case, a still-valid cached token remains usable, but expiry or rejection requires an explicit **Reconnect Google** action, potentially before the seven-day Testing authorization limit. This prevents adopting a different Google cookie account silently.
+
 This is access-token renewal plus repeat authorization, **not a refresh-token implementation**. A revoked grant or synthetic clock test does not prove that seven real days elapsed. Natural seven-day observation remains pending until actually observed; Google Testing behavior is expected pilot operation, not an assertion that every token lives seven days.
 
 ## Residual architecture

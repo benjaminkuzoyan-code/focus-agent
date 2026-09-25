@@ -1,0 +1,43 @@
+{
+  "contract": "1.0.0",
+  "flavor": "core",
+  "milestone": "v0.8.21",
+  "phases": [
+    {
+      "number": "1",
+      "name": "Stable Extension ID + OAuth Hardening",
+      "status": "in_progress"
+    },
+    {
+      "number": "1.5",
+      "name": "Fly.io Coach Hosting + Pilot Smoke Test",
+      "status": "pending"
+    },
+    {
+      "number": "2",
+      "name": "Canvas + Google Classroom Read Access",
+      "status": "pending"
+    },
+    {
+      "number": "3",
+      "name": "Enforced Cadence + One-Bubble Coach + Finish Moment",
+      "status": "pending"
+    },
+    {
+      "number": "4",
+      "name": "Aeries Adapter + Fixture Tests",
+      "status": "pending"
+    },
+    {
+      "number": "5",
+      "name": "Full Real-Device QA + Accessibility",
+      "status": "pending"
+    }
+  ],
+  "next": {
+    "command": "$gsd-execute-phase 1",
+    "label": "Resume owner OAuth acceptance",
+    "reason": "01-04 Task 2 requires observed Chrome identity, both Console registrations and permitted-account recovery; do not mark complete automatically"
+  },
+  "updated_at": "2026-09-25T00:01:25.005150+00:00"
+}

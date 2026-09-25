@@ -3,12 +3,12 @@ gsd_state_version: "1.0"
 milestone: v0.8.21
 current_phase: 1
 current_phase_name: Stable Extension ID + OAuth Hardening
-status: executing
-stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-09-24T23:46:47.951Z"
+status: awaiting_human_verification
+stopped_at: 01-04 Task 2 — Google Console and real-account acceptance pending
+last_updated: "2026-09-25T00:01:25.005150+00:00"
 last_activity: 2026-09-24
-last_activity_desc: Phase 1 execution started
-state_head: 6f279e23fe55e167febf9e1e10a9c1ec5d1d253a
+last_activity_desc: Implementation, review and both release packages verified; owner OAuth acceptance pending
+state_head: 60bcbebf0a5b2116b75db34d710aec22741a1392
 progress:
   total_phases: 6
   completed_phases: 0
@@ -27,20 +27,20 @@ See: .planning/PROJECT.md (updated 2026-09-17)
 
 ## Current Position
 
-Phase: 1 (Stable Extension ID + OAuth Hardening) — EXECUTING
+Phase: 1 (Stable Extension ID + OAuth Hardening) — AWAITING LIVE ACCEPTANCE
 Next up after Phase 1: Phase 1.5 (Fly.io Coach Hosting + Pilot Smoke Test) — roadmapped, not yet discussed/planned
 Plan: 4 of 4
-Status: Ready to execute
-Last activity: 2026-09-24 — Phase 1 execution started
+Status: 3/4 plans complete; 01-04 Task 1 complete, Task 2 awaits owner evidence
+Last activity: 2026-09-24 — Final builds and automated checks verified; Google Console/account checks pending.
 
-Progress: [░░░░░░░░░░] 0%
+Phase 1 progress: 3/4 plans complete; final plan 1/2 tasks complete. Milestone phases complete: 0/6.
 
 ## Resuming This Project (you're new to GSD — read this first)
 
 This project uses **GSD** (a structured planning/build workflow: discuss → plan → execute → verify, per phase). You paused mid-flow, so here's how to pick it back up correctly instead of guessing at slash commands:
 
 1. **Start with `/gsd-progress`** (or just `/gsd-next`) — either one reads this file plus ROADMAP.md and tells you exactly where things stand and what command to run next. Don't manually re-run `/gsd-new-project` — the project already exists.
-2. **The next real step is `/gsd-plan-phase 1`** — Phase 1 (OAuth) already has its context captured (`.planning/phases/01-stable-extension-id-oauth-hardening/01-CONTEXT.md`); this turns that into an actual task plan. Add `--auto` only if you want it to run unattended through research → plan → verify without stopping for your input.
+2. **Resume 01-04 Task 2 using `docs/OAUTH-RUNBOOK.md`.** Code review is clean, the main chain passed 252 checks, OAuth panel 22/22 and toolbar 13/13 passed, and both archives passed extraction validation. The seven original full-panel smoke failures remain. Observe Chrome ID/redirect, confirm both Google clients, and record permitted-account connection/recovery. Return public replacement client IDs or sanitized results here; the executor handles source changes and rebuilds. Do not rerun plan-phase or mark AUTH complete from mocks.
 3. **After Phase 1 ships, do `/gsd-discuss-phase 1.5`** to capture context for the Fly.io hosting phase (its ROADMAP.md entry has the architecture already decided, but discuss-phase will ask a few implementation questions before planning), then `/gsd-plan-phase 1.5`.
 4. **Stay pilot-focused.** Phases 2 (Canvas/Classroom), 3 (cadence/coach UI), 4 (Aeries), and 5 (full QA/accessibility) are real and still in ROADMAP.md, but they're marked ⏸ DEFERRED on purpose. Don't let a GSD auto-advance chain (`--auto`/`--chain`) run past Phase 1.5 into Phase 2 without deciding that's actually what you want next — check in on priority before continuing past the pilot-critical work.
 5. If you're ever unsure what to run, `/gsd-help` lists commands, and `/gsd-progress` is always safe to run as a status check — it doesn't change anything.
@@ -49,7 +49,7 @@ This project uses **GSD** (a structured planning/build workflow: discuss → pla
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 3
 - Average duration: - min
 - Total execution time: 0 hours
 
@@ -114,7 +114,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-24T23:46:47.942Z
-Stopped at: Completed 01-03-PLAN.md
-Resume file: None
-Next command: /gsd-progress (to confirm state), then /gsd-plan-phase 1
+Last session: 2026-09-25T00:01:25.005150+00:00
+Stopped at: 01-04 Task 2 — blocking owner/live acceptance; all local implementation/readiness work complete
+Resume file: .planning/phases/01-stable-extension-id-oauth-hardening/01-04-SUMMARY.md
+Next action: Follow docs/OAUTH-RUNBOOK.md and return live outcomes/public client IDs in this task; resume 01-04 Task 2. Do not advance phases until acceptance and security entries T-01-12/15/17 are verified.

@@ -44,3 +44,8 @@
 - Observation: `assignmentMeta` restores assignment chats, files, steps, and practice tests; `studentSnapshot` caches Blackbaud grades for the selected marking period. Coach context includes four recent grades per class but does not retrieve other assignments' saved threads/files/tests. Heavy assignment memory is pruned after 30 days marked done; teacher feedback has no dedicated normalized field or retrieval path.
 - Action: Extend these existing stores when planning longitudinal learning context; explicitly address retention, cross-assignment retrieval, and teacher-feedback ingestion rather than assuming cached portal data provides them.
 - Confidence: high
+
+**2026-09-24 — Permanent pilot identity and reviewed recovery**
+- Observation: The committed public key derives `hamjokekeddfckjjfmciillddifhdeda`; packaging pins that ID. Current Google scopes may not provide verified email, so a web token cannot always renew with provable account continuity. Review also caught silent reconnection after disconnect and stale preflight status writes.
+- Action: Preserve the permanent key; require deliberate reconnect when renewal lacks verified identity; retain the explicit-disconnect and ordered-probe regression cases. Use the real-panel `--google-auth` mode alongside the unchanged full-smoke baseline.
+- Confidence: high

@@ -34,7 +34,7 @@ Decimal phases appear between their surrounding integers in numeric order. Phase
   2. A student on a school-managed account that blocks third-party OAuth apps can still connect via the personal-Gmail fallback door.
   3. When a pilot friend's Google authorization lapses (Testing-mode 7-day expiry), the extension surfaces a clear "reconnect Google" prompt instead of a silent or raw error.
 
-**Plans**: 3/4 plans executed
+**Plans**: 3/4 plans complete; 01-04 readiness complete, owner/live acceptance pending
 
 Plans:
 **Wave 1**
@@ -153,7 +153,7 @@ Active now: 1 → 1.5. Everything after is deferred until after the first pilot 
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Stable Extension ID + OAuth Hardening | 3/4 | In Progress|  |
+| 1. Stable Extension ID + OAuth Hardening | 3/4 | Awaiting owner/live acceptance |  |
 | 1.5. Fly.io Coach Hosting + Pilot Smoke Test | 0/TBD | 🎯 Active (not yet planned) | - |
 | 2. Canvas + Google Classroom Read Access | 0/TBD | ⏸ Deferred | - |
 | 3. Enforced Cadence + One-Bubble Coach + Finish Moment | 0/TBD | ⏸ Deferred | - |
