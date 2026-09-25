@@ -35,9 +35,9 @@
     }
   ],
   "next": {
-    "command": "$gsd-execute-phase 1",
-    "label": "Resume owner OAuth acceptance",
-    "reason": "01-04 Task 2 requires observed Chrome identity, both Console registrations and permitted-account recovery; do not mark complete automatically"
+    "command": "$gsd-resume-work",
+    "label": "Resume paused OAuth owner acceptance",
+    "reason": "User paused at 01-04 Task 2; read HANDOFF.json and .continue-here.md before continuing."
   },
-  "updated_at": "2026-09-25T00:01:25.005150+00:00"
+  "updated_at": "2026-09-25T00:05:00.505Z"
 }

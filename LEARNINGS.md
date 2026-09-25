@@ -49,3 +49,8 @@
 - Observation: The committed public key derives `hamjokekeddfckjjfmciillddifhdeda`; packaging pins that ID. Current Google scopes may not provide verified email, so a web token cannot always renew with provable account continuity. Review also caught silent reconnection after disconnect and stale preflight status writes.
 - Action: Preserve the permanent key; require deliberate reconnect when renewal lacks verified identity; retain the explicit-disconnect and ordered-probe regression cases. Use the real-panel `--google-auth` mode alongside the unchanged full-smoke baseline.
 - Confidence: high
+
+**2026-09-24 — Phase 1 pause handoff**
+- Observation: 01-04-SUMMARY.md exists with `status: halted` and only one of two tasks complete; counting SUMMARY files would incorrectly report Phase 1 as finished.
+- Action: Resume from HANDOFF.json and the phase .continue-here.md, and check summary status plus owner evidence before updating plan/requirement completion.
+- Confidence: high

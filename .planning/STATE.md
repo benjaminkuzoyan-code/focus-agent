@@ -3,9 +3,9 @@ gsd_state_version: "1.0"
 milestone: v0.8.21
 current_phase: 1
 current_phase_name: Stable Extension ID + OAuth Hardening
-status: awaiting_human_verification
-stopped_at: 01-04 Task 2 — Google Console and real-account acceptance pending
-last_updated: "2026-09-25T00:01:25.005150+00:00"
+status: paused
+stopped_at: User paused at 01-04 Task 2 — owner OAuth acceptance pending
+last_updated: "2026-09-25T00:05:00.505Z"
 last_activity: 2026-09-24
 last_activity_desc: Implementation, review and both release packages verified; owner OAuth acceptance pending
 state_head: 60bcbebf0a5b2116b75db34d710aec22741a1392
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-17)
 Phase: 1 (Stable Extension ID + OAuth Hardening) — AWAITING LIVE ACCEPTANCE
 Next up after Phase 1: Phase 1.5 (Fly.io Coach Hosting + Pilot Smoke Test) — roadmapped, not yet discussed/planned
 Plan: 4 of 4
-Status: 3/4 plans complete; 01-04 Task 1 complete, Task 2 awaits owner evidence
+Status: Paused by user; 3/4 plans complete; 01-04 Task 2 awaits owner evidence
 Last activity: 2026-09-24 — Final builds and automated checks verified; Google Console/account checks pending.
 
 Phase 1 progress: 3/4 plans complete; final plan 1/2 tasks complete. Milestone phases complete: 0/6.
@@ -116,5 +116,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 Last session: 2026-09-25T00:01:25.005150+00:00
 Stopped at: 01-04 Task 2 — blocking owner/live acceptance; all local implementation/readiness work complete
-Resume file: .planning/phases/01-stable-extension-id-oauth-hardening/01-04-SUMMARY.md
-Next action: Follow docs/OAUTH-RUNBOOK.md and return live outcomes/public client IDs in this task; resume 01-04 Task 2. Do not advance phases until acceptance and security entries T-01-12/15/17 are verified.
+Resume file: .planning/phases/01-stable-extension-id-oauth-hardening/.continue-here.md
+Next action: Run $gsd-resume-work, then follow docs/OAUTH-RUNBOOK.md and return live outcomes/public client IDs in this task; resume 01-04 Task 2. Do not advance phases until acceptance and security entries T-01-12/15/17 are verified.

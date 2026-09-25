@@ -1,0 +1,57 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-09-25T00:05:00.505Z",
+  "phase": "01",
+  "phase_name": "Stable Extension ID + OAuth Hardening",
+  "phase_dir": ".planning/phases/01-stable-extension-id-oauth-hardening",
+  "plan": 4,
+  "task": 2,
+  "total_tasks": 2,
+  "status": "paused",
+  "completed_tasks": [
+    {
+      "id": 1,
+      "name": "Final regression, both release archives and owner readiness",
+      "status": "done",
+      "commit": "3e489ed"
+    }
+  ],
+  "remaining_tasks": [
+    {
+      "id": 2,
+      "name": "Owner matches both OAuth clients and verifies real account recovery",
+      "status": "awaiting_human_action"
+    }
+  ],
+  "blockers": [
+    {
+      "description": "Actual Chrome identity, both Google OAuth registrations and permitted managed-account acceptance remain unverified. AUTH-01/02/03 and security T-01-12/15/17 stay open.",
+      "type": "human_action",
+      "workaround": "Follow docs/OAUTH-RUNBOOK.md; mocks cannot replace live evidence."
+    }
+  ],
+  "async_jobs": [],
+  "human_actions_pending": [
+    {
+      "action": "Observe Chrome ID/redirect, confirm both client registrations, test permitted sign-in and revoked/expired-grant reconnect. Return sanitized results or replacement public client IDs.",
+      "context": "01-04 Task 2 blocking-human checkpoint; implementation and packages are ready.",
+      "blocking": true
+    }
+  ],
+  "decisions": [
+    {
+      "decision": "Pause at the existing owner acceptance checkpoint; do not restart planning or advance phases.",
+      "rationale": "User requested pause after completed local work.",
+      "phase": "01"
+    },
+    {
+      "decision": "Fly.io for Phase 1.5; other approved pilot scope unchanged.",
+      "rationale": "Explicit user direction; hosting not implemented in this session.",
+      "phase": "01.5"
+    }
+  ],
+  "uncommitted_files": [],
+  "uncommitted_files_measured_at": "2026-09-25T00:05:00.505Z",
+  "next_action": "Run $gsd-resume-work, read this handoff and docs/OAUTH-RUNBOOK.md, then continue 01-04 Task 2 with owner evidence.",
+  "context_notes": "Plans 01-01 through 01-03 complete. 01-04 SUMMARY exists but is halted, not complete. Code review clean. Main252 + panel22 + toolbar13 pass; full panel retains7 baseline failures. No running task-owned services or async jobs are known. dist and signing PEM are ignored/local only; regenerate archives from committed source if unavailable, never regenerate permanent key. Push includes local implementation history plus pause metadata."
+}
